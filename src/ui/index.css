@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0f0f13;
+  --color-surface: #18181b;
+  --color-surface-hover: #27272a;
+  
+  --color-primary: #6366f1; 
+  --color-primary-hover: #4f46e5;
+  
+  --color-text-main: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+  
+  --font-sans: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text-main);
+    overflow: hidden; /* Prevents scrollbars in the desktop app */
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+}
