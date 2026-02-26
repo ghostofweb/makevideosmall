@@ -1,17 +1,8 @@
-export interface ElectronFile extends File {
-  path: string;
-}
-
-export interface QueuedFile {
-  path: string;
-  name: string;
-  size: number;
-}
-
+export type AppMode = 'bulk' | 'single';
 export type DragState = 'idle' | 'accept' | 'reject';
-export type AppMode = 'single' | 'bulk';
-export type AppStep = 'ingest' | 'analyzing' | 'preview';
 export type AppView = 'workspace' | 'queue';
+export type AnalysisState = 'none' | 'analyzing' | 'done';
+export type QueueState = 'ingest' | 'processing' | 'completed' | 'failed';
 
 export interface QueuedFile {
   id: string;
@@ -19,11 +10,15 @@ export interface QueuedFile {
   name: string;
   size: number;
   preset: string;
-  analysisState: 'none' | 'analyzing' | 'done';
-  queueState: 'ingest' | 'processing' | 'completed';
-  
-  // NEW: Processing Telemetry Data
+  analysisState: AnalysisState;
+  queueState: QueueState;
   progress: number;
   eta: string;
   logs: string[];
+    completedAt?: number;
+}
+
+// Extend File to include optional `path` for Electron
+export interface ElectronFile extends File {
+  path?: string;
 }

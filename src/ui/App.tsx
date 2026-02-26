@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Header } from './components/Header';
+import { Header } from './pages/components/Header';
 import { Home } from './pages/Home';
-import { SettingsPanel } from './components/SettingsPanel';
+import { SettingsPanel } from './pages/components/SettingsPanel';
 import { Toaster } from 'sonner';
 
 function App() {
