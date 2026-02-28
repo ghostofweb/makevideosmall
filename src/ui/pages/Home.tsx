@@ -13,6 +13,7 @@ import {
   Play,
   BrainCircuit,
   Sparkles,
+  Clock // Added Clock icon for Queued state
 } from 'lucide-react';
 
 // shadcn/ui components
@@ -29,13 +30,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 
-import { type DragState, type QueuedFile, type ElectronFile, type AppView } from '../types';
+import { type DragState, type QueuedFile, type AppView } from '../types';
 import { Queue } from './Queue';
 import { AnalyzingView } from './components/AnalyzingView';
 import { PreviewStudio } from './components/PreviewStudio';
-import { HardwareWidget } from './components/HardwareWidget';
 import { DetailedStats } from './components/DetailedStats';
-import { VideoDNAPanel } from './components/VideoDNAPanel';
 
 const { ipcRenderer, webUtils } = window.require('electron');
 
@@ -47,11 +46,10 @@ function formatBytes(bytes: number) {
 
 // Quick estimate function for instant feedback
 function getQuickEstimate(sizeBytes: number, preset: string) {
-  // Rough AV1 compression ratios
   const ratios = {
-    max: 0.65,      // Retains 65% of original size
-    balanced: 0.45, // Retains 45% of original size
-    fast: 0.25,     // Retains 25% of original size
+    max: 0.80,      
+    balanced: 0.55, 
+    fast: 0.35,
   };
   
   const estimatedSize = sizeBytes * ratios[preset as keyof typeof ratios];
@@ -90,6 +88,7 @@ export function Home() {
 
   const ingestFiles = files.filter((f) => f.queueState === 'ingest');
   const processingCount = files.filter((f) => f.queueState === 'processing').length;
+  const queuedCount = files.filter((f) => f.queueState === 'queued').length;
   const completedCount = files.filter((f) => f.queueState === 'completed').length;
   const totalSizeBytes = ingestFiles.reduce((acc, file) => acc + file.size, 0);
 
@@ -97,49 +96,166 @@ export function Home() {
 
   // Load completed jobs on mount
   useEffect(() => {
-    const loadJobs = async () => {
-      const result = await ipcRenderer.invoke('load-completed-jobs');
-      if (result.success && result.jobs.length > 0) {
-        setFiles(prev => {
-          const existingIds = new Set(prev.map(f => f.id));
-          const newJobs = result.jobs.filter((j: QueuedFile) => !existingIds.has(j.id));
-          return [...prev, ...newJobs];
-        });
+    const loadWorkspace = async () => {
+      try {
+        const result = await ipcRenderer.invoke('load-workspace');
+        if (result.success && result.files && result.files.length > 0) {
+          setFiles(result.files);
+        }
+      } catch (e) {
+        console.error("Failed to load workspace state");
       }
     };
-    loadJobs();
+    loadWorkspace();
   }, []);
 
-  // Mock engine updates + save completed jobs
   useEffect(() => {
-    const interval = setInterval(() => {
-      setFiles((prev) => {
-        const updated = prev.map((f) => {
-          if (f.queueState === 'processing' && f.progress < 100) {
-            const newProgress = Math.min(f.progress + Math.random() * 2, 100);
-            const isComplete = newProgress === 100;
-            const newLog = `[SVT-AV1] Frame ${Math.floor(newProgress * 1.4)} encoded | Bitrate: ${(Math.random() * 4 + 2).toFixed(2)} Mbps | Speed: 18.2 fps`;
-            return {
-              ...f,
-              progress: newProgress,
-              queueState: isComplete ? 'completed' : 'processing',
-              eta: isComplete ? 'Done' : `~${Math.floor((100 - newProgress) / 2)}m ${Math.floor(Math.random() * 60)}s left`,
-              logs: [...f.logs.slice(-15), newLog],
-              completedAt: isComplete ? Date.now() : f.completedAt,
-            };
-          }
-          return f;
-        });
-        // Save completed jobs to disk
-        const completed = updated.filter(f => f.queueState === 'completed');
-        if (completed.length > 0) {
-          ipcRenderer.invoke('save-completed-jobs', completed);
+    if (files.length > 0) {
+      ipcRenderer.invoke('save-workspace', files).catch(console.error);
+    }
+  }, [files]);
+
+  // Telemetry Listener
+  useEffect(() => {
+    const handleTelemetry = (_event: any, data: any) => {
+      setFiles((prev) => prev.map((f) => {
+        if (f.id === data.fileId) {
+          return {
+            ...f,
+            progress: data.progress,
+            eta: data.eta,
+            queueState: data.type === 'complete' ? 'completed' : 'processing',
+            completedAt: data.type === 'complete' ? Date.now() : f.completedAt,
+          };
         }
-        return updated;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
+        return f;
+      }));
+    };
+
+    const handleLogs = (_event: any, data: any) => {
+      setFiles((prev) => prev.map((f) => {
+        if (f.id === data.fileId) {
+          return { ...f, logs: [...f.logs.slice(-49), data.log] };
+        }
+        return f;
+      }));
+    };
+
+    ipcRenderer.on('encode-telemetry', handleTelemetry);
+    ipcRenderer.on('encode-log', handleLogs);
+
+    return () => {
+      ipcRenderer.removeListener('encode-telemetry', handleTelemetry);
+      ipcRenderer.removeListener('encode-log', handleLogs);
+    };
   }, []);
+
+const cancelJob = async (id: string) => {
+    const file = files.find(f => f.id === id);
+    if (!file) return;
+
+    if (file.queueState === 'processing') {
+      toast.error("Aborting the engine...");
+      await ipcRenderer.invoke('cancel-encode');
+    } else if (file.queueState === 'queued') {
+      setFiles(prev => prev.map(f => f.id === id ? { ...f, queueState: 'ingest', logs: ['[QUEUE] Removed from queue.'] } : f));
+      toast.info("Removed from queue.");
+    }
+  };
+
+  // ====================================================================
+  // THE TRAFFIC CONTROLLER (React Queue System)
+  // ====================================================================
+  
+  // 1. Watch the queue and start jobs automatically
+  useEffect(() => {
+    const activeJob = files.find((f) => f.queueState === 'processing');
+    const nextJob = files.find((f) => f.queueState === 'queued');
+
+    // If nothing is currently encoding, and someone is waiting in line -> START IT!
+    if (!activeJob && nextJob) {
+      executeEncodeJob(nextJob);
+    }
+  }, [files]); 
+
+  // 2. The actual function that talks to Node.js
+  const executeEncodeJob = async (file: QueuedFile) => {
+    // Lock it in!
+    setFiles((prev) => prev.map((f) => 
+      f.id === file.id ? { ...f, queueState: 'processing', logs: ['[ENGINE] Initializing SVT-AV1 Encoder...'] } : f
+    ));
+
+    let previewsToDelete: string[] = [];
+    if (file.previewData?.videos) {
+      const vids = file.previewData.videos;
+      previewsToDelete = [
+        vids.original, vids.previews?.max?.video_path, vids.previews?.balanced?.video_path, vids.previews?.fast?.video_path
+      ].filter(Boolean); 
+    }
+
+    const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');
+
+    try {
+      const response = await ipcRenderer.invoke('start-encode', {
+        fileId: file.id, inputPath: file.path, preset: file.preset, previewsToDelete, settings 
+      });
+
+      if (response.success) {
+        setFiles(prev => prev.map(f => f.id === file.id ? { 
+          ...f, queueState: 'completed', outputPath: response.outputPath, progress: 100, eta: 'Done' 
+        } : f));
+
+        // 🔴 AUTOMATION: Only trigger when the ENTIRE queue is finished!
+        setTimeout(() => {
+          setFiles(currentFiles => {
+            const stillBusy = currentFiles.some(f => f.id !== file.id && (f.queueState === 'processing' || f.queueState === 'queued'));
+            
+            if (!stillBusy) {
+              if (settings.playSoundOnFinish) {
+                const formatPath = (p: string) => `local://${encodeURI(p.replace(/\\/g, '/'))}`;
+                const audioSrc = settings.customSoundPath ? formatPath(settings.customSoundPath) : '/default-sound.mp3';
+                const audio = new Audio(audioSrc);
+                audio.play().catch(e => console.error("Audio failed:", e));
+                setTimeout(() => { audio.pause(); audio.currentTime = 0; }, 4000); 
+              }
+              if (settings.shutdownOnFinish) {
+                ipcRenderer.invoke('shutdown-pc');
+                toast.error("QUEUE FINISHED! PC SHUTTING DOWN IN 10 SECONDS!", { duration: 10000 });
+              } else {
+                toast.success("All videos in the queue have finished encoding!");
+              }
+            }
+            return currentFiles;
+          });
+        }, 500);
+
+      } else {
+        toast.error(`Encode failed for ${file.name}`);
+        setFiles(prev => prev.map(f => f.id === file.id ? { ...f, queueState: 'ingest' } : f));
+      }
+    } catch (e) {
+      toast.error("Bridge connection failed.");
+      setFiles(prev => prev.map(f => f.id === file.id ? { ...f, queueState: 'ingest' } : f));
+    }
+  };
+
+  // 3. The UI triggers (These just put files in line)
+  const sendToProcessingQueue = (id: string) => {
+    setFiles((prev) => prev.map((f) => 
+      f.id === id ? { ...f, queueState: 'queued', logs: ['[QUEUE] Waiting for available engine slot...'] } : f
+    ));
+    toast.success('Added to Queue');
+    setCurrentView('queue');
+  };
+
+  const compressAll = () => {
+    setFiles((prev) => prev.map((f) => 
+      f.queueState === 'ingest' ? { ...f, queueState: 'queued', logs: ['[QUEUE] Waiting for available engine slot...'] } : f
+    ));
+    toast.success('All jobs sent to Queue!');
+    setCurrentView('queue');
+  };
+  // ====================================================================
 
   const analyzeFile = async (id: string, overridePath?: string, autoNavigate = false) => {
     const filePath = overridePath || files.find((f) => f.id === id)?.path;
@@ -221,34 +337,28 @@ export function Home() {
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, preset } : f)));
 
   const removeFile = (id: string) => {
+    const file = files.find(f => f.id === id);
+    
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedFileId === id) setSelectedFileId(null);
+
+    if (file?.previewData?.videos) {
+      const vids = file.previewData.videos;
+      const previewsToDelete = [
+        vids.original,
+        vids.previews?.max?.video_path,
+        vids.previews?.balanced?.video_path,
+        vids.previews?.fast?.video_path
+      ].filter(Boolean);
+
+      previewsToDelete.forEach(path => {
+        ipcRenderer.invoke('delete-physical-file', path).catch(() => {});
+      });
+    }
   };
 
   const toggleLogs = (id: string) =>
     setExpandedLogs((prev) => (prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id]));
-
-  const sendToProcessingQueue = (id: string) => {
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.id === id
-          ? { ...f, queueState: 'processing', logs: ['[ENGINE] Initializing SVT-AV1 Encoder...'] }
-          : f
-      )
-    );
-    toast.success('Job sent to Processing Queue.');
-  };
-
-  const compressAll = () => {
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.queueState === 'ingest'
-          ? { ...f, queueState: 'processing', logs: ['[ENGINE] Initializing SVT-AV1 Encoder...'] }
-          : f
-      )
-    );
-    toast.success('All jobs sent to Processing Queue.');
-  };
 
   return (
     <main className="relative flex-1 flex flex-col p-6 gap-4 overflow-hidden bg-background">
@@ -295,6 +405,7 @@ export function Home() {
             expandedLogs={expandedLogs}
             toggleLogs={toggleLogs}
             removeFile={removeFile}
+            cancelJob={cancelJob}
             onBack={() => setCurrentView('workspace')}
           />
         ) : (
@@ -312,9 +423,6 @@ export function Home() {
               </h1>
 
               <div className="flex items-center gap-3">
-                {/* <div className="hidden md:block">
-                  <HardwareWidget />
-                </div> */}
                 <Button
                   onClick={() => setCurrentView('queue')}
                   variant="outline"
@@ -323,7 +431,7 @@ export function Home() {
                   <Activity className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
                   Processing Queue
                   <Badge variant="secondary" className="ml-1 bg-primary/20 text-primary border-none">
-                    {processingCount} Active
+                    {(processingCount + queuedCount)} Active
                   </Badge>
                   {completedCount > 0 && (
                     <Badge variant="outline" className="ml-1 bg-green-500/10 text-green-400 border-green-500/20">
@@ -391,7 +499,7 @@ export function Home() {
                   </div>
                 </motion.div>
 
-                {/* File List (only shown if files exist) */}
+                {/* File List */}
                 {ingestFiles.length > 0 && (
                   <Card className="flex-1 bg-card/40 backdrop-blur-sm border-border/50 shadow-lg overflow-hidden flex flex-col">
                     <CardContent className="p-4 flex-1 flex flex-col gap-3">
@@ -450,7 +558,6 @@ export function Home() {
                                 </div>
 
                                 <div className="flex items-center gap-2 flex-wrap justify-end mt-2 sm:mt-0">
-                                  {/* Enhanced preset dropdown with estimate */}
                                   <div className="flex flex-col items-end gap-1">
                                     <Select value={file.preset} onValueChange={(val) => updateFilePreset(file.id, val)}>
                                       <SelectTrigger className="w-[130px] h-7 text-xs">
@@ -463,7 +570,6 @@ export function Home() {
                                       </SelectContent>
                                     </Select>
                                     
-                                    {/* DYNAMIC ESTIMATE TEXT */}
                                     <div className="text-[10px] pr-1 flex items-center gap-1.5">
                                       {file.analysisState === 'done' ? (
                                         <>
@@ -573,7 +679,7 @@ export function Home() {
                 )}
               </div>
 
-              {/* Right column: Quick Insights or Video DNA */}
+              {/* Right column: Quick Insights */}
               <AnimatePresence>
                 {selectedFile ? (
                   <motion.div
@@ -583,7 +689,6 @@ export function Home() {
                     exit={{ opacity: 0, x: 20 }}
                     className="w-80 shrink-0"
                   >
-                    {/* <VideoDNAPanel file={selectedFile} onClose={() => setSelectedFileId(null)} /> */}
                   </motion.div>
                 ) : (
                   <motion.div
@@ -609,6 +714,12 @@ export function Home() {
                             <span className="text-muted-foreground">Processing</span>
                             <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
                               {processingCount}
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-muted-foreground">Queued</span>
+                            <Badge variant="secondary" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                              {queuedCount}
                             </Badge>
                           </div>
                           <div className="flex justify-between items-center text-sm">
@@ -644,6 +755,11 @@ export function Home() {
             onBack={() => setAppStep('ingest')}
             selectedPreset={selectedPreset}
             setSelectedPreset={setSelectedPreset}
+            onEncode={(preset) => {
+              sendToProcessingQueue(selectedFile.id);
+              setAppStep('ingest');
+              setCurrentView('queue');
+            }}
           />
         )}
       </AnimatePresence>

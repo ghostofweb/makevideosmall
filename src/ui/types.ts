@@ -2,8 +2,8 @@ export type AppMode = 'bulk' | 'single';
 export type DragState = 'idle' | 'accept' | 'reject';
 export type AppView = 'workspace' | 'queue';
 export type AnalysisState = 'none' | 'analyzing' | 'done';
-export type QueueState = 'ingest' | 'processing' | 'completed' | 'failed';
-
+// Add 'queued' to the list of allowed states
+export type QueueState = 'ingest' | 'queued' | 'processing' | 'completed';
 export interface QueuedFile {
   id: string;
   path: string;
@@ -16,6 +16,8 @@ export interface QueuedFile {
   eta: string;
   logs: string[];
     completedAt?: number;
+    previewData?: any;      // Holds the AI JSON from Python
+  outputPath?: string;
 }
 
 // Extend File to include optional `path` for Electron

@@ -127,16 +127,15 @@ def api_analyze(file_path, temp_dir):
     
     PREVIEW_DURATION = "5" # 5 seconds of video for the loop
     
-    # 🔴 BULLETPROOF FIX: We now use the safe temp_dir passed from Node.js
     vid_orig = os.path.join(temp_dir, f"vb_temp_orig_{uid}.mp4").replace("\\", "/")
     
-    # The Extreme Tiering System
+    # 🔴 UPGRADED QUALITY TIERS
     if dna['width'] >= 3840: # 4K Footage
-        crf_max, crf_bal, crf_fast = 32, 44, 54
+        crf_max, crf_bal, crf_fast = 28, 36, 44
     elif dna['width'] >= 1920: # 1080p Footage
-        crf_max, crf_bal, crf_fast = 28, 38, 48
+        crf_max, crf_bal, crf_fast = 24, 32, 40
     else: # 720p or lower
-        crf_max, crf_bal, crf_fast = 26, 34, 42
+        crf_max, crf_bal, crf_fast = 22, 28, 36
 
     presets = {
         "max": {
@@ -169,6 +168,11 @@ def api_analyze(file_path, temp_dir):
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "16", "-an", vid_orig
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    # 🔴 AUDIO WEIGHT MATH
+    # We estimate the audio track to be ~128kbps (16 KB/sec) to add back to our video estimates.
+    audio_bytes_per_sec = 128000 / 8 
+    total_audio_bytes = audio_bytes_per_sec * dna['duration']
+
     # 2. Benchmark the 3 Presets
     estimates = {}
     for key, p in presets.items():
@@ -188,10 +192,14 @@ def api_analyze(file_path, temp_dir):
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         enc_time = time.time() - start_enc
         
-        # Math Estimates
+        # 🔴 FIXED FILE SIZE MATH
         if os.path.exists(p['out']):
             test_size = os.path.getsize(p['out'])
-            est_total_size = (test_size / float(PREVIEW_DURATION)) * dna['duration']
+            
+            # Predict total video weight, then add predicted audio weight
+            est_video_bytes = (test_size / float(PREVIEW_DURATION)) * dna['duration']
+            est_total_size = est_video_bytes + total_audio_bytes
+            
             est_mins = ((enc_time / float(PREVIEW_DURATION)) * dna['duration']) / 60
             
             estimates[key] = {
@@ -216,21 +224,92 @@ def api_analyze(file_path, temp_dir):
     print(json.dumps(payload))
 
     
-def api_encode(file_path, preset_id, output_path):
+def api_encode(file_path, preset_id, output_path, threads="0"):
     """
     Called by Electron when the user clicks 'Compress'.
-    For now, we just simulate the launch of the Master Encode.
+    Runs the actual SVT-AV1 encode and streams real-time data back.
     """
     log(f"[PYTHON] ENGAGING MASTER ENCODE for {file_path}")
-    log(f"[PYTHON] Mode: {preset_id.upper()} | Output: {output_path}")
+    log(f"[PYTHON] Mode: {preset_id.upper()} | Target Output: {output_path}")
     
-    # NOTE: In Phase 5, we will put the actual Av1an command here and stream 
-    # the progress back to Electron. For now, we simulate success.
-    time.sleep(2) 
+    dna = extract_dna(file_path)
+    total_frames = dna.get('total_frames', 1) # Prevent division by zero
     
-    payload = {"status": "success", "message": "Encode triggered successfully."}
-    print(json.dumps(payload))
+    # 🔴 UPGRADED QUALITY TIERS (Must match analysis!)
+    if dna['width'] >= 3840:
+        crf = 28 if preset_id == 'max' else 36 if preset_id == 'balanced' else 44
+    elif dna['width'] >= 1920:
+        crf = 24 if preset_id == 'max' else 32 if preset_id == 'balanced' else 40
+    else:
+        crf = 22 if preset_id == 'max' else 28 if preset_id == 'balanced' else 36
 
+    preset_num = "4" if preset_id == 'max' else "6" if preset_id == 'balanced' else "8"
+
+    # Build FFMPEG Command
+    cmd = [
+        "ffmpeg", "-y", "-i", file_path,
+        "-c:v", "libsvtav1", "-preset", preset_num, "-crf", str(crf),
+        "-svtav1-params", f"tune=0:film-grain={dna['grain_level']}:lp={threads}",
+        "-c:a", "copy",
+        output_path
+    ]
+    
+    log(f"[PYTHON] Executing: {' '.join(cmd)}")
+    
+    # Launch Process & Stream Output
+    process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+    start_time = time.time()
+    
+    for line in process.stderr:
+        line = line.strip()
+        if not line: continue
+        
+        log(f"[FFMPEG] {line}")
+        
+        if "frame=" in line and "time=" in line:
+            try:
+                frame_match = re.search(r'frame=\s*(\d+)', line)
+                fps_match = re.search(r'fps=\s*([\d.]+)', line)
+                
+                if frame_match:
+                    frame = int(frame_match.group(1))
+                    fps = float(fps_match.group(1)) if fps_match else 0.0
+                    
+                    progress = min(99.9, (frame / total_frames) * 100)
+                    
+                    # Calculate ETA
+                    elapsed = time.time() - start_time
+                    if progress > 0:
+                        total_est = elapsed / (progress / 100)
+                        eta_secs = total_est - elapsed
+                        eta = f"{int(eta_secs // 60)}m {int(eta_secs % 60)}s"
+                    else:
+                        eta = "Calculating..."
+                        
+                    # Hardware Telemetry
+                    cpu_usage = psutil.cpu_percent()
+                    ram_usage = psutil.virtual_memory().used / (1024**3)
+                    
+                    telemetry = {
+                        "type": "telemetry",
+                        "progress": progress,
+                        "fps": fps,
+                        "cpu": cpu_usage,
+                        "ram": ram_usage,
+                        "eta": eta
+                    }
+                    print(json.dumps(telemetry), flush=True)
+            except Exception as e:
+                pass # Ignore parsing errors for weirdly formatted lines
+
+    process.wait()
+    
+    if process.returncode == 0:
+        log("[PYTHON] MASTER ENCODE COMPLETED SUCCESSFULLY!")
+        print(json.dumps({"type": "complete", "progress": 100, "eta": "Done"}))
+    else:
+        log(f"[PYTHON ERROR] FFMPEG failed with code {process.returncode}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     # Ensure Python can find ffmpeg and av1an in the current 'engine' folder
@@ -241,7 +320,9 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=str, required=True, help="Path to input video.")
     parser.add_argument("--preset", type=str, choices=["max", "balanced", "fast"], default="balanced", help="Encoding preset ID.")
     parser.add_argument("--output", type=str, help="Path to output video.")
-    parser.add_argument("--tempdir", type=str, help="Safe temporary directory for preview files.") # <--- THIS MUST BE HERE
+    parser.add_argument("--tempdir", type=str, help="Safe temporary directory for preview files.") 
+    
+    parser.add_argument("--threads", type=str, default="0", help="Max logical processors to use.") 
     
     args = parser.parse_args()
 
@@ -255,4 +336,5 @@ if __name__ == "__main__":
         if not args.output:
             log("[CRITICAL] Output path is required for encoding.")
             sys.exit(1)
-        api_encode(args.input, args.preset, args.output)
+            
+        api_encode(args.input, args.preset, args.output, args.threads)

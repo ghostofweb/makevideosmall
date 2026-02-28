@@ -13,9 +13,10 @@ interface PreviewStudioProps {
   onBack: () => void;
   selectedPreset: string;
   setSelectedPreset: (val: string) => void;
+  onEncode: (preset: string) => void;
 }
 
-export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset }: PreviewStudioProps) {
+export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset, onEncode }: PreviewStudioProps) {
   const [videoErrors, setVideoErrors] = useState<string[]>([]);
   const [videosLoaded, setVideosLoaded] = useState({ orig: false, comp: false });
   const videoRefOriginal = useRef<HTMLVideoElement>(null);
@@ -136,7 +137,8 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset 
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      className="absolute inset-0 z-40 bg-background flex flex-col p-4 md:p-6 lg:p-8 gap-4 md:gap-6 overflow-hidden"
+      // DESKTOP FOUNDATION: Strict flex-col bounded to window bounds
+      className="absolute inset-0 z-40 bg-background flex flex-col p-4 sm:p-6 gap-4 sm:gap-6 overflow-hidden"
     >
       {/* Animated background gradient */}
       <motion.div
@@ -151,233 +153,247 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset 
         transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
       />
 
-      {/* Header */}
+      {/* Header - Shrink 0 ensures it never gets crushed vertically */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="relative z-10 flex flex-wrap items-center justify-between gap-3 bg-card/70 backdrop-blur-md border border-border/50 rounded-2xl p-3 shadow-lg"
+        className="shrink-0 relative z-10 flex flex-wrap items-center justify-between gap-3 bg-card/70 backdrop-blur-md border border-border/50 rounded-2xl p-3 shadow-sm"
       >
         <Button onClick={onBack} variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
           <ChevronLeft className="w-4 h-4" /> Back
         </Button>
-        <h2 className="text-lg md:text-xl font-bold text-foreground flex items-center gap-2">
+        <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
           <SlidersHorizontal className="w-5 h-5 text-primary" />
-          <span className="hidden sm:inline">Visual Preview Studio</span>
-          <span className="sm:hidden">Preview</span>
+          Visual Preview Studio
         </h2>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary/80 rounded-full border border-border/50 max-w-[200px] truncate">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary/80 rounded-full border border-border/50 max-w-[250px] sm:max-w-xs truncate">
           <FileVideo className="w-4 h-4 text-primary shrink-0" />
           <span className="font-mono text-xs truncate">{file.name}</span>
         </div>
       </motion.div>
 
-      {/* Main content – responsive stack */}
-      <div className="relative z-10 flex-1 flex flex-col lg:flex-row gap-4 md:gap-6 min-h-0">
-        {/* Left: Compare Slider */}
+      {/* Main content split - Flex 1 takes remaining height. min-h-0 prevents flex overflow issues. */}
+      <div className="relative z-10 flex-1 flex flex-col md:flex-row gap-4 sm:gap-6 min-h-0 overflow-hidden">
+        
+        {/* LEFT: Compare Slider */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="flex-1 min-h-[300px] lg:min-h-0"
+          // Scales perfectly. min-h constraints prevent the video from breaking if the user makes window tiny
+          className="flex-1 flex flex-col min-h-[200px] sm:min-h-[300px] rounded-2xl overflow-hidden bg-black/40 border border-border/50 shadow-2xl relative"
         >
-          <Card className="h-full overflow-hidden bg-black/40 border-border/50 shadow-2xl relative group">
-            <ReactCompareSlider
-              className="w-full h-full"
-              itemOne={
-                <div className="relative w-full h-full bg-black">
-                  <video
-                    ref={videoRefOriginal}
-                    src={origVid}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    preload="auto"
-                    className="w-full h-full object-contain"
-                    onLoadedData={() => setVideosLoaded(prev => ({ ...prev, orig: true }))}
-                    onError={(e) => {
-                      console.error('Original video error', e);
-                      setVideoErrors(prev => [...prev, 'Original']);
-                    }}
-                  />
-                  {!videosLoaded.orig && !videoErrors.includes('Original') && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                      <Activity className="w-8 h-8 text-primary animate-spin" />
-                    </div>
-                  )}
-                </div>
-              }
-              itemTwo={
-                <div className="relative w-full h-full bg-black">
-                  <video
-                    ref={videoRefCompressed}
-                    src={currentPreviewVid}
-                    key={selectedPreset}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    preload="auto"
-                    className="w-full h-full object-contain"
-                    onLoadedData={() => setVideosLoaded(prev => ({ ...prev, comp: true }))}
-                    onError={(e) => {
-                      console.error('Compressed video error', e);
-                      setVideoErrors(prev => [...prev, 'Compressed']);
-                    }}
-                  />
-                  {!videosLoaded.comp && !videoErrors.includes('Compressed') && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                      <Activity className="w-8 h-8 text-primary animate-spin" />
-                    </div>
-                  )}
-                </div>
-              }
-            />
-
-            {/* Badges */}
-            <div className="absolute top-3 left-3 right-3 flex justify-between pointer-events-none">
-              <Badge variant="secondary" className="bg-black/80 text-white/90 border-white/10 backdrop-blur-md shadow-lg">
-                Original
-              </Badge>
-              <Badge className="bg-primary/90 text-primary-foreground border-primary/50 backdrop-blur-md shadow-[0_0_15px_rgba(99,102,241,0.5)]">
-                AV1 (CRF {activeStats.crf_used})
-              </Badge>
-            </div>
-
-            {/* Error overlay */}
-            {videoErrors.length > 0 && (
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-destructive/90 text-destructive-foreground text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
-                <AlertCircle className="w-4 h-4" />
-                Failed to load: {videoErrors.join(', ')}
+          <ReactCompareSlider
+            className="w-full h-full"
+            itemOne={
+              <div className="relative w-full h-full bg-black">
+                <video
+                  ref={videoRefOriginal}
+                  src={origVid}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                  className="w-full h-full object-contain"
+                  onLoadedData={() => setVideosLoaded(prev => ({ ...prev, orig: true }))}
+                  onError={(e) => {
+                    console.error('Original video error', e);
+                    setVideoErrors(prev => [...prev, 'Original']);
+                  }}
+                />
+                {!videosLoaded.orig && !videoErrors.includes('Original') && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                    <Activity className="w-8 h-8 text-primary animate-spin" />
+                  </div>
+                )}
               </div>
-            )}
-          </Card>
+            }
+            itemTwo={
+              <div className="relative w-full h-full bg-black">
+                <video
+                  ref={videoRefCompressed}
+                  src={currentPreviewVid}
+                  key={selectedPreset}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                  className="w-full h-full object-contain"
+                  onLoadedData={() => setVideosLoaded(prev => ({ ...prev, comp: true }))}
+                  onError={(e) => {
+                    console.error('Compressed video error', e);
+                    setVideoErrors(prev => [...prev, 'Compressed']);
+                  }}
+                />
+                {!videosLoaded.comp && !videoErrors.includes('Compressed') && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                    <Activity className="w-8 h-8 text-primary animate-spin" />
+                  </div>
+                )}
+              </div>
+            }
+          />
+
+          {/* Badges */}
+          <div className="absolute top-4 left-4 right-4 flex justify-between pointer-events-none z-10">
+            <Badge variant="secondary" className="bg-black/80 text-white/90 border-white/10 backdrop-blur-md shadow-lg">
+              Original
+            </Badge>
+            <Badge className="bg-primary/90 text-primary-foreground border-primary/50 backdrop-blur-md shadow-[0_0_15px_rgba(99,102,241,0.5)] transition-all">
+              AV1 (CRF {activeStats.crf_used})
+            </Badge>
+          </div>
+
+          {/* Error overlay */}
+          {videoErrors.length > 0 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-destructive/90 text-destructive-foreground text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-lg z-20">
+              <AlertCircle className="w-4 h-4" />
+              Failed to load: {videoErrors.join(', ')}
+            </div>
+          )}
         </motion.div>
 
-        {/* Right: AI Data Panel */}
+        {/* RIGHT: AI Data Panel */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.3 }}
-          className="w-full lg:w-[380px] xl:w-[420px] flex flex-col gap-4 shrink-0 overflow-y-auto custom-scrollbar pr-1"
+          // Fixed desktop width. Flex-col handles internal scrolling cleanly.
+          className="w-full md:w-96 shrink-0 flex flex-col h-full min-h-0"
         >
-          {/* DNA Card */}
-          <Card className="border-border/50 bg-card/70 backdrop-blur-sm shadow-lg">
-            <CardContent className="p-5">
-              <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold mb-4 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
-                AI Treatment Plan
+          {/* SCROLLABLE INNER AREA */}
+          {/* This allows the DNA card and presets to scroll if the app window is too short vertically */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 pr-2">
+            
+            {/* DNA Card */}
+            <Card className="border-border/50 bg-card/70 backdrop-blur-sm shadow-md shrink-0">
+              <CardContent className="p-5">
+                <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold mb-4 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
+                  AI Treatment Plan
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-[10px]">RESOLUTION</p>
+                    <p className="font-mono font-bold truncate">{dna.width}x{dna.height}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-[10px]">FPS</p>
+                    <p className="font-mono font-bold">{dna.fps.toFixed(2)}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-[10px]">CODEC</p>
+                    <p className="font-mono font-bold truncate">{dna.v_codec}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-[10px]">BIT DEPTH</p>
+                    <p className="font-mono font-bold truncate">{dna.bit_depth}-bit {dna.is_hdr ? 'HDR' : 'SDR'}</p>
+                  </div>
+                  <div className="col-span-1 sm:col-span-2 space-y-1">
+                    <p className="text-muted-foreground text-[10px]">SENSOR CLONE</p>
+                    <p className="text-indigo-400 font-bold truncate">{dna.noise_profile}</p>
+                  </div>
+                  <div className="col-span-1 sm:col-span-2 space-y-1">
+                    <p className="text-muted-foreground text-[10px]">AUDIO</p>
+                    <p className="font-mono font-bold truncate">{dna.a_codec.toUpperCase()} · {dna.a_channels} channels</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Preset Selector */}
+            <div className="space-y-3 shrink-0">
+              <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold ml-1 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-yellow-400" /> Target Profile
               </h3>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-[10px]">RESOLUTION</p>
-                  <p className="font-mono font-bold">{dna.width}x{dna.height}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-[10px]">FPS</p>
-                  <p className="font-mono font-bold">{dna.fps.toFixed(2)}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-[10px]">CODEC</p>
-                  <p className="font-mono font-bold">{dna.v_codec}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-[10px]">BIT DEPTH</p>
-                  <p className="font-mono font-bold">{dna.bit_depth}-bit {dna.is_hdr ? 'HDR' : 'SDR'}</p>
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <p className="text-muted-foreground text-[10px]">SENSOR CLONE</p>
-                  <p className="text-indigo-400 font-bold">{dna.noise_profile}</p>
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <p className="text-muted-foreground text-[10px]">AUDIO</p>
-                  <p className="font-mono font-bold">{dna.a_codec.toUpperCase()} · {dna.a_channels} channels</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              <motion.div
+                variants={containerVariants}
+                initial="hidden"
+                animate="show"
+                className="space-y-3"
+              >
+                {['max', 'balanced', 'fast'].map((key) => {
+                  const presetData = estimates[key];
+                  const isSelected = selectedPreset === key;
+                  const titles: Record<string, string> = {
+                    max: 'Max Quality (Slow)',
+                    balanced: 'Balanced (Medium)',
+                    fast: 'Max Compression (Fast)',
+                  };
 
-          {/* Preset Selector */}
-          <div className="space-y-2">
-            <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold ml-1 flex items-center gap-2">
-              <Zap className="w-4 h-4 text-yellow-400" /> Target Profile
-            </h3>
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="show"
-              className="space-y-2"
-            >
-              {['max', 'balanced', 'fast'].map((key) => {
-                const presetData = estimates[key];
-                const isSelected = selectedPreset === key;
-                const titles: Record<string, string> = {
-                  max: 'Max Quality (Slow)',
-                  balanced: 'Balanced (Medium)',
-                  fast: 'Max Compression (Fast)',
-                };
-
-                return (
-                  <motion.div
-                    key={key}
-                    variants={itemVariants}
-                    whileHover={{ scale: 1.02, transition: { type: 'spring', stiffness: 400 } }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setSelectedPreset(key)}
-                    className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 
-                      ${isSelected
-                        ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(99,102,241,0.3)]'
-                        : 'border-border/50 bg-card/50 hover:border-border hover:bg-card/80'}`}
-                  >
-                    <div className="flex flex-col gap-1">
-                      <span className={`font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                        {titles[key]}
-                      </span>
-                      <span className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <span className="text-green-400">▼</span> {presetData.size_formatted}
+                  return (
+                    <motion.div
+                      key={key}
+                      variants={itemVariants}
+                      whileHover={{ scale: 1.02, transition: { type: 'spring', stiffness: 400 } }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setSelectedPreset(key)}
+                      className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 
+                        ${isSelected
+                          ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
+                          : 'border-border/50 bg-card/50 hover:border-border hover:bg-card/80'}`}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <span className={`font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                          {titles[key]}
                         </span>
-                        <span className="w-1 h-1 rounded-full bg-border" />
-                        <span className="flex items-center gap-1">
-                          <span className="text-yellow-400">⏱️</span> {presetData.time_formatted}
+                        <span className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <span className="text-green-400">▼</span> {presetData.size_formatted}
+                          </span>
+                          <span className="w-1 h-1 rounded-full bg-border" />
+                          <span className="flex items-center gap-1">
+                            <span className="text-yellow-400">⏱️</span> {presetData.time_formatted}
+                          </span>
                         </span>
-                      </span>
-                    </div>
-                    {isSelected && (
-                      <motion.div
-                        initial={{ scale: 0, rotate: -180 }}
-                        animate={{ scale: 1, rotate: 0 }}
-                        transition={{ type: 'spring', stiffness: 300 }}
-                        className="absolute right-4"
-                      >
-                        <CheckCircle2 className="w-6 h-6 text-primary" />
-                      </motion.div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </motion.div>
+                      </div>
+                      {isSelected && (
+                        <motion.div
+                          initial={{ scale: 0, rotate: -180 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          transition={{ type: 'spring', stiffness: 300 }}
+                          className="absolute right-4"
+                        >
+                          <CheckCircle2 className="w-6 h-6 text-primary" />
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </motion.div>
+            </div>
           </div>
 
-          {/* Master Encode Button */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="mt-auto pt-4"
-          >
-            <Button
-              size="lg"
-              className="w-full h-14 text-base font-bold bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90 text-primary-foreground shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:shadow-[0_0_30px_rgba(99,102,241,0.5)] transition-all duration-300"
-              onClick={() => {
-                console.log('Encode Triggered:', selectedPreset);
-                // Here you'd call your encode API
-              }}
-            >
-              <Zap className="w-5 h-5 mr-2 fill-current" /> ENGAGE MASTER ENCODE
-            </Button>
-          </motion.div>
+          {/* FIXED BOTTOM ACTION BUTTON */}
+          {/* Shrink-0 keeps it anchored perfectly below the scrollable content. */}
+          <div className="shrink-0 pt-4 mt-4 lg:mt-2 border-t border-border/30 sticky bottom-0 bg-background/95 backdrop-blur-sm lg:static lg:bg-transparent lg:backdrop-blur-none z-20 pb-2 lg:pb-0">
+  <Button
+    size="lg"
+    className="w-full h-12 md:h-14 text-sm md:text-base font-bold bg-gradient-to-r from-primary to-purple-600..."
+    onClick={() => {
+onEncode(selectedPreset);
+      const crfToUse = estimates[selectedPreset].crf_used;
+      
+      // 2. Send payload to Electron Main via your preload script
+      window.electron.ipcRenderer.send('add-to-queue', {
+        id: file.id,
+        path: file.path,
+        preset: selectedPreset,
+        crf: crfToUse,
+        duration: dna.duration_seconds // Required for accurate ETA calculation in Python
+      });
+
+      // 3. Close the studio and switch to the Queue view
+      onBack(); 
+    }}
+  >
+    <Zap className="w-4 h-4 md:w-5 md:h-5 mr-2 fill-current" /> ENGAGE MASTER ENCODE
+  </Button>
+</div>
+
         </motion.div>
       </div>
     </motion.div>

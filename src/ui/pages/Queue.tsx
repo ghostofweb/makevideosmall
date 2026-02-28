@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft,
@@ -12,6 +12,10 @@ import {
   Loader2,
   PlayCircle,
   XCircle,
+  FolderOpen,
+  Trash2,
+  X,
+  StopCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -21,24 +25,35 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Recharts for live graphs
-import { LineChart, Line, ResponsiveContainer, Area, AreaChart, YAxis, Tooltip } from 'recharts';
+import { LineChart, Line, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
 import { type QueuedFile } from '../types';
+
+const { ipcRenderer } = window.require('electron');
 
 interface QueueProps {
   activeJobs: QueuedFile[];
   expandedLogs: string[];
   toggleLogs: (id: string) => void;
   removeFile: (id: string) => void;
+  cancelJob: (id: string) => void; 
   onBack: () => void;
 }
 
-export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack }: QueueProps) {
+export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancelJob, onBack }: QueueProps) {
   const [showTerminal, setShowTerminal] = useState(false);
   const [telemetry, setTelemetry] = useState<{ time: string; cpu: number; ram: number; fps: number }[]>([]);
+  
+  // Auto-scroll ref for the terminal
+  const terminalEndRef = useRef<HTMLDivElement>(null);
 
   // Identify current job
   const activeJob =
@@ -46,22 +61,60 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
     activeJobs.find((j) => j.queueState === 'ingest') ||
     activeJobs[activeJobs.length - 1];
 
-  // Mock telemetry updates
+  // Auto-scroll the terminal whenever new logs arrive
   useEffect(() => {
-    if (activeJob?.queueState !== 'processing') return;
-    const interval = setInterval(() => {
-      setTelemetry((prev) => {
-        const newPoint = {
-          time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          cpu: Math.min(100, Math.max(70, (prev[prev.length - 1]?.cpu || 80) + (Math.random() * 6 - 3))),
-          ram: Math.min(12, Math.max(3.5, (prev[prev.length - 1]?.ram || 4.2) + (Math.random() * 0.4 - 0.2))),
-          fps: Math.min(22, Math.max(15, (prev[prev.length - 1]?.fps || 18) + (Math.random() * 2 - 1))),
-        };
-        return [...prev.slice(-20), newPoint];
-      });
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [activeJob?.queueState]);
+    if (showTerminal && terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeJob?.logs, showTerminal]);
+
+  // Telemetry updates
+  useEffect(() => {
+    const handleTelemetry = (_event: any, data: any) => {
+      if (data.type === 'telemetry') {
+        setTelemetry((prev) => {
+          const newPoint = {
+            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            cpu: data.cpu || 0,
+            ram: data.ram || 0,
+            fps: data.fps || 0,
+          };
+          return [...prev.slice(-19), newPoint];
+        });
+      }
+    };
+
+    if (ipcRenderer) {
+      ipcRenderer.on('encode-telemetry', handleTelemetry);
+    }
+
+    return () => {
+      if (ipcRenderer) {
+        ipcRenderer.removeListener('encode-telemetry', handleTelemetry);
+      }
+    };
+  }, []);
+
+  // --- FILE MANAGEMENT HANDLERS ---
+  const handleOpenLocation = async (job: any) => {
+    const targetPath = job.outputPath || job.path;
+    await ipcRenderer.invoke('open-file-location', targetPath);
+  };
+
+  const handlePhysicalDelete = async (id: string, path: string) => {
+    const confirm = window.confirm("WARNING: This will permanently delete the original video file from your hard drive. Are you sure?");
+    if (confirm) {
+      const res = await ipcRenderer.invoke('delete-physical-file', path);
+      if (res.success) {
+        toast.success("File deleted from disk.");
+        // This removes it from the queue visually immediately!
+        removeFile(id); 
+      } else {
+        toast.error("Failed to delete file from disk.");
+      }
+    }
+  };
+  // -------------------------------------
 
   // Circular progress calculation
   const radius = 120;
@@ -90,6 +143,7 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
 
       {/* 3‑column layout */}
       <div className="flex-1 flex gap-4 overflow-hidden pb-2">
+        
         {/* Left: Job Roster */}
         <Card className="w-1/4 bg-card/50 border-border/50 flex flex-col">
           <CardHeader className="py-3 px-4">
@@ -106,13 +160,14 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                   return (
                     <div
                       key={job.id}
-                      className={`p-2 rounded-md flex items-center gap-2 transition-colors ${
+                      className={`group p-2 rounded-md flex items-center gap-2 transition-colors ${
                         isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent/20'
                       }`}
                     >
-                      <div className="relative flex items-center justify-center w-6 h-6">
+                      <div className="relative flex items-center justify-center w-6 h-6 shrink-0">
                         {job.queueState === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-400" />}
                         {job.queueState === 'ingest' && <PlayCircle className="w-4 h-4 text-muted-foreground" />}
+                        {job.queueState === 'queued' && <Loader2 className="w-4 h-4 text-muted-foreground animate-pulse" />}
                         {job.queueState === 'processing' && (
                           <>
                             <Loader2 className="w-4 h-4 text-primary animate-spin absolute" />
@@ -127,11 +182,91 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                             ? 'Completed'
                             : job.queueState === 'ingest'
                             ? 'Pending'
+                            : job.queueState === 'queued'
+                            ? 'Waiting...'
                             : `${job.progress.toFixed(1)}%`}
                         </p>
                       </div>
+
+                      {/* THE ACTION BUTTONS MENU */}
+                      <TooltipProvider delayDuration={150}>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200 shrink-0 bg-background/80 backdrop-blur-md rounded-md border border-border/50 p-0.5 shadow-lg translate-x-2 group-hover:translate-x-0">
+                          
+                          {/* 🔴 ABORT BUTTON */}
+                          {(job.queueState === 'processing' || job.queueState === 'queued') && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="w-7 h-7 hover:bg-destructive/20 hover:text-destructive text-orange-400/80 transition-colors" 
+                                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+                                >
+                                  <StopCircle className="w-3.5 h-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-[10px] font-medium">
+                                {job.queueState === 'processing' ? "Abort Encoding" : "Remove from Queue"}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+
+                          {/* 📁 FOLDER BUTTON */}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="w-7 h-7 hover:bg-blue-500/20 hover:text-blue-400 text-muted-foreground transition-colors" 
+                                onClick={(e) => { e.stopPropagation(); handleOpenLocation(job); }}
+                              >
+                                <FolderOpen className="w-3.5 h-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-[10px] font-medium">
+                              Open File Location
+                            </TooltipContent>
+                          </Tooltip>
+
+                          {/* ❌ CLEAR BUTTON */}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="w-7 h-7 hover:bg-yellow-500/20 hover:text-yellow-400 text-muted-foreground transition-colors" 
+                                onClick={(e) => { e.stopPropagation(); removeFile(job.id); }}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-[10px] font-medium">
+                              Clear from Queue
+                            </TooltipContent>
+                          </Tooltip>
+
+                          {/* 🗑️ DELETE PHYSICAL FILE BUTTON */}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="w-7 h-7 hover:bg-red-500/20 hover:text-red-500 text-muted-foreground transition-colors" 
+                                onClick={(e) => { e.stopPropagation(); handlePhysicalDelete(job.id, job.path); }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-[10px] font-medium text-destructive">
+                              Delete Original File from Disk
+                            </TooltipContent>
+                          </Tooltip>
+
+                        </div>
+                      </TooltipProvider>
+
                       {job.queueState === 'processing' && (
-                        <Badge variant="outline" className="text-[10px] px-1 py-0">
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 group-hover:hidden">
                           {job.eta}
                         </Badge>
                       )}
@@ -144,7 +279,8 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
         </Card>
 
         {/* Center: Main HUD */}
-<Card className="flex-1 bg-card/30 border-border/50 relative flex flex-col items-center justify-center overflow-hidden">          {activeJob ? (
+        <Card className="flex-1 bg-card/30 border-border/50 relative flex flex-col items-center justify-center overflow-hidden">
+          {activeJob ? (
             <>
               {/* Big circular progress */}
               <div className="relative flex items-center justify-center my-4">
@@ -206,20 +342,21 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                     animate={{ y: 0 }}
                     exit={{ y: '100%' }}
                     transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                     className="absolute bottom-0 left-0 right-0 h-1/2 bg-black/90 border-t border-border backdrop-blur-md flex flex-col z-20"
+                    className="absolute bottom-0 left-0 right-0 h-1/2 bg-black/95 border-t border-border backdrop-blur-md flex flex-col z-20"
                   >
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-black/40 border-b border-white/5">
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-black/60 border-b border-white/10 shrink-0">
                       <div className="flex items-center gap-2">
                         <Terminal className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-[10px] font-mono uppercase">Raw Output</span>
+                        <span className="text-[10px] font-mono uppercase text-muted-foreground">Raw Output</span>
                       </div>
                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowTerminal(false)}>
                         <XCircle className="w-3 h-3" />
                       </Button>
                     </div>
-                    <ScrollArea className="flex-1 p-2 font-mono text-[10px]">
-                      {activeJob.logs.map((log, i) => (
-                        <div key={i} className="text-green-400/80 whitespace-pre-wrap">
+                    {/* Replaced ScrollArea with standard overflow-y-auto div for proper scrolling */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 font-mono text-[10px]">
+                      {activeJob.logs?.map((log, i) => (
+                        <div key={i} className="text-green-400/80 whitespace-pre-wrap mb-1">
                           <span className="text-blue-400/60 mr-2">[{new Date().toLocaleTimeString()}]</span>
                           {log}
                         </div>
@@ -228,10 +365,12 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                         <motion.span
                           animate={{ opacity: [1, 0] }}
                           transition={{ repeat: Infinity, duration: 0.8 }}
-                          className="inline-block w-2 h-3.5 bg-green-400 mt-1"
+                          className="inline-block w-2 h-3 bg-green-400 mt-1 ml-1"
                         />
                       )}
-                    </ScrollArea>
+                      {/* This invisible div is what we auto-scroll down to! */}
+                      <div ref={terminalEndRef} />
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -257,14 +396,14 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                 </span>
                 <span className="text-xs text-muted-foreground mb-1">/ 12 cores</span>
               </div>
-              <div className="h-16 mt-2">
+              <div className="h-16 mt-2" style={{ minHeight: '64px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={telemetry}>
                     <defs>
                       <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#818cf8" stopOpacity={0.4} />
                         <stop offset="100%" stopColor="#818cf8" stopOpacity={0} />
-                      </linearGradient>
+                      </linearGradient> 
                     </defs>
                     <Area type="monotone" dataKey="cpu" stroke="#818cf8" strokeWidth={2} fill="url(#cpuGrad)" />
                   </AreaChart>
@@ -310,7 +449,7 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, onBack
                 </span>
                 <span className="text-xs text-muted-foreground mb-1">FPS</span>
               </div>
-              <div className="h-16 mt-2">
+              <div className="h-16 mt-2" style={{ minHeight: '64px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={telemetry}>
                     <Line type="monotone" dataKey="fps" stroke="#fbbf24" strokeWidth={2} dot={false} />

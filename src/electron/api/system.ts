@@ -1,8 +1,9 @@
-import { ipcMain, dialog, app } from "electron";
+import { ipcMain, dialog, app, shell } from "electron";
 import os from "os";
 import fs from "fs";
 import path from "path";
 import si from "systeminformation";
+import { exec } from "child_process";
 
 // --- STATIC HARDWARE INFO (cached) ---
 let cpuCores = os.cpus().length;
@@ -112,7 +113,7 @@ export function registerSystemAPIs() {
       gpuUsage,
     };
   });
-
+  const workspacePath = path.join(app.getPath('userData'), 'videobake_workspace.json');
   // =========================================================
   // PERSISTENT JOB STORAGE
   // =========================================================
@@ -138,5 +139,97 @@ export function registerSystemAPIs() {
       console.error("Failed to load jobs:", err);
       return { success: false, error: err };
     }
+  });
+
+  ipcMain.handle('load-workspace', async () => {
+    try {
+      if (fs.existsSync(workspacePath)) {
+        const data = fs.readFileSync(workspacePath, 'utf-8');
+        if (!data || data.trim() === '') return { success: true, files: [] };
+        
+        const parsedFiles = JSON.parse(data);
+        const safeFiles = parsedFiles.map((f: any) => {
+          if (f.analysisState === 'analyzing') {
+            f.analysisState = 'none';
+          }
+          if (f.queueState === 'processing') {
+            f.queueState = 'ingest'; 
+            f.progress = 0;
+            f.logs.push("[SYSTEM] App closed during processing. Job reset.");
+          }
+          return f;
+        });
+
+        return { success: true, files: safeFiles };
+      }
+      return { success: true, files: [] };
+    } catch (error) {
+      console.error("Failed to load workspace:", error);
+      return { success: true, files: [] };
+    }
+  });
+
+  ipcMain.handle('save-workspace', async (event, files) => {
+    try {
+      fs.writeFileSync(workspacePath, JSON.stringify(files, null, 2));
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to save workspace:", error);
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('open-file-location', async (event, filePath) => {
+    try {
+      shell.showItemInFolder(path.normalize(filePath));
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to open folder:", error);
+      return { success: false };
+    }
+  });
+
+ipcMain.handle('select-folder', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return canceled ? null : filePaths[0];
+  });
+
+  
+  ipcMain.handle('delete-physical-file', async (event, filePath) => {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath); 
+        return { success: true };
+      }
+      return { success: false, error: "File not found." };
+    } catch (error) {
+      console.error("Failed to delete file:", error);
+      return { success: false };
+    }
+  });
+
+
+  ipcMain.handle('open-folder', async (event, folderPath) => {
+    if (fs.existsSync(folderPath)) {
+      shell.openPath(folderPath);
+    }
+  });
+
+
+  // 3. Audio File Picker
+  ipcMain.handle('select-audio', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'aac'] }]
+    });
+    return canceled ? null : filePaths[0];
+  });
+
+  // 4. Shutdown PC
+  ipcMain.handle('shutdown-pc', () => {
+    console.log("[AUTOMATION] Shutting down PC in 10 seconds...");
+    if (process.platform === 'win32') exec('shutdown /s /t 10');
+    else if (process.platform === 'darwin') exec('osascript -e \'tell app "System Events" to shut down\'');
+    else exec('shutdown -h now');
   });
 }
