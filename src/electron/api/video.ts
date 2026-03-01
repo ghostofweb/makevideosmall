@@ -9,10 +9,9 @@ let activeOutputPath: string | null = null;
 
 export function registerVideoAPIs() {
   
-
   ipcMain.handle("cancel-encode", async () => {
     if (activePythonProcess && activePythonProcess.pid) {
-      console.log("[NODE BRIDGE] 🛑 CANCEL SIGNAL RECEIVED. Terminating process tree...");
+      console.log("[NODE BRIDGE] Terminating process tree...");
       const pid = activePythonProcess.pid;
 
       // Force kill process tree on Windows to ensure FFmpeg dies with Python
@@ -25,12 +24,12 @@ export function registerVideoAPIs() {
       // Clean up the half-finished video file
       if (activeOutputPath) {
         const fileToDelete = activeOutputPath;
-        // Short delay to ensure FFmpeg has released its lock on the file
+        
         setTimeout(() => {
           if (fs.existsSync(fileToDelete)) {
             try {
               fs.unlinkSync(fileToDelete);
-              console.log(`[NODE BRIDGE] 🗑️ Cleaned up aborted file: ${fileToDelete}`);
+              console.log(`[NODE BRIDGE] Cleaned up aborted file: ${fileToDelete}`);
             } catch (e) {
               console.error("[NODE BRIDGE] Failed to delete aborted file", e);
             }
@@ -45,8 +44,7 @@ export function registerVideoAPIs() {
     return { success: false, error: "No active process" };
   });
 
-
-  ipcMain.handle("analyze-video", async (event, filePath) => {
+  ipcMain.handle("analyze-video", async (event, { filePath, settings }) => {
     return new Promise((resolve) => {
       const engineDir = path.join(app.getAppPath(), "engine");
       const pythonScript = path.join(engineDir, "compress.py");
@@ -73,11 +71,16 @@ export function registerVideoAPIs() {
         PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
       };
 
+      const totalThreads = os.cpus().length;
+      const freeThreads = settings?.freeCpuCores ?? 2; 
+      const threadsToUse = Math.max(1, totalThreads - freeThreads).toString();
+
       const pythonProcess = spawn("python", [
         pythonScript,
         "--action", "analyze",
         "--input", filePath,
-        "--tempdir", safeTempDir 
+        "--tempdir", safeTempDir,
+        "--threads", threadsToUse 
       ], { env });
 
       let jsonOutput = "";
@@ -118,19 +121,21 @@ export function registerVideoAPIs() {
 
   ipcMain.handle("start-encode", async (event, { fileId, inputPath, preset, previewsToDelete, settings, customFileName }) => {
     
-    // 1. Create an output path (e.g., "MyVideo_AV1.mp4")
     const parsedPath = path.parse(inputPath);
-   const finalName = customFileName ? customFileName : `${parsedPath.name}_AV1`;
-    let outputPath = path.join(parsedPath.dir, `${finalName}${parsedPath.ext}`);
-    // If custom routing is enabled and a path exists, override it!
+    
+    const finalBaseName = customFileName 
+      ? customFileName.replace(/\.[^/.]+$/, "") 
+      : `${parsedPath.name}_AV1`;
+
+
+    let outputPath = path.join(parsedPath.dir, `${finalBaseName}${parsedPath.ext}`);
     if (settings?.outputRouting === 'custom' && settings?.customOutputPath) {
-      outputPath = path.join(settings.customOutputPath, `${parsedPath.name}_AV1${parsedPath.ext}`);
+      outputPath = path.join(settings.customOutputPath, `${finalBaseName}${parsedPath.ext}`);
     }
 
     const engineDir = path.join(app.getAppPath(), "engine");
     const pythonScript = path.join(engineDir, "compress.py");
 
-    // 2. Clean up temporary preview files from the hard drive to save space
     if (previewsToDelete && Array.isArray(previewsToDelete)) {
       previewsToDelete.forEach(tempFile => {
         if (tempFile && fs.existsSync(tempFile)) {
@@ -159,13 +164,9 @@ export function registerVideoAPIs() {
       PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
     };
 
-    // Calculate Allowed CPU Threads
-    const totalThreads = os.cpus().length;
-    const freeThreads = settings?.freeCpuCores ?? 2; // Default to saving 2 cores
-    // Ensure we give it at least 1 thread so it doesn't crash
+    const freeThreads = settings?.freeCpuCores ?? 2; 
     const threadsToUse = Math.max(1, totalThreads - freeThreads).toString();
 
-    // 3. Spawn Python for the Master Encode
     const pythonProcess = spawn("python", [
       pythonScript,
       "--action", "encode",
@@ -203,7 +204,6 @@ export function registerVideoAPIs() {
       pythonProcess.on("close", (code) => {
         console.log(`\n[NODE BRIDGE] Encode finished with code: ${code}`);
         
-        // 🔴 CLEAR THE GLOBALS
         activePythonProcess = null;
         activeOutputPath = null;
 

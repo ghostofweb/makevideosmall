@@ -133,7 +133,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        {/* 🔴 FIX: Prioritize customName over original name! */}
                         <p className="text-xs font-medium truncate" title={job.customName || job.name}>
                           {job.customName || job.name}
                         </p>

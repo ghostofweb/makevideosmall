@@ -11,7 +11,6 @@ export function Header({ onOpenSettings }: HeaderProps) {
 
   return (
     <header
-      // 🔴 FIX: Changed `py-3` to `pb-3 pt-10` to push content below the OS controls!
       className="flex justify-between items-center px-6 pb-3 pt-10 bg-background/80 backdrop-blur-md border-b border-border select-none z-30"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >

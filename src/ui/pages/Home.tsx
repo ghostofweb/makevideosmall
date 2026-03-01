@@ -56,7 +56,6 @@ export function Home() {
   const [selectedPreset, setSelectedPreset] = useState<string>('balanced');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
 
-  // 🔴 RENAME MODAL STATE
   const [renameModal, setRenameModal] = useState<{
     isOpen: boolean;
     fileId: string;
@@ -150,7 +149,7 @@ export function Home() {
     try {
       const response = await ipcRenderer.invoke('start-encode', {
         fileId: file.id, inputPath: file.path, preset: file.preset, 
-        customFileName: file.customName, // 🔴 Pass the custom name to the backend
+        customFileName: file.customName,
         previewsToDelete: [], settings 
       });
 
@@ -185,7 +184,6 @@ export function Home() {
     }
   };
 
-  // 🔴 1. The function that Opens the Modal
   const requestCompression = (id: string, preset: string, source: 'ingest' | 'studio') => {
     const file = files.find(f => f.id === id);
     if (!file) return;
@@ -196,7 +194,6 @@ export function Home() {
     setRenameModal({ isOpen: true, fileId: id, preset, source });
   };
 
-  // 🔴 2. The function that Confirm the Modal
   const confirmCompression = () => {
     if (!renameModal) return;
     const { fileId, preset, source } = renameModal;
@@ -243,7 +240,8 @@ export function Home() {
     if (autoNavigate) setAppStep('analyzing');
 
     try {
-      const response = await ipcRenderer.invoke('analyze-video', filePath);
+      const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');
+      const response = await ipcRenderer.invoke('analyze-video', { filePath, settings });
       if (response.success) {
         setFiles(prev => prev.map(f => f.id === id ? { ...f, analysisState: 'done', previewData: response.data } : f));
         if (autoNavigate) setAppStep('preview');
@@ -321,7 +319,6 @@ export function Home() {
 
         <input type="file" ref={fileInputRef} className="hidden" accept="video/*" multiple onChange={(e) => { if (e.target.files) processFiles(Array.from(e.target.files)); e.target.value = ''; }} />
 
-        {/* 🔴 RENAME MODAL */}
         <AnimatePresence>
           {renameModal && (
             <motion.div
@@ -520,7 +517,6 @@ export function Home() {
               onBack={() => setAppStep('ingest')}
               selectedPreset={selectedPreset}
               setSelectedPreset={setSelectedPreset}
-              // 🔴 Passes trigger back to Home.tsx modal
               onEncode={(preset) => requestCompression(selectedFile.id, preset, 'studio')} 
             />
           )}

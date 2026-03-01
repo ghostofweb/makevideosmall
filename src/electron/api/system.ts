@@ -5,21 +5,18 @@ import path from "path";
 import si from "systeminformation";
 import { exec } from "child_process";
 
-// --- STATIC HARDWARE INFO (cached) ---
 let cpuCores = os.cpus().length;
 let totalRamGb = os.totalmem() / (1024 ** 3);
 let cpuModel = "Detecting CPU...";
 let gpuName = "Detecting GPU...";
 let gpuUsage = 0;
 
-// Fetch detailed CPU info once
 si.cpu()
   .then(data => {
     cpuModel = data.brand;
   })
   .catch(err => console.error("CPU detection failed:", err));
 
-// Fetch GPU info (including usage if possible)
 si.graphics()
   .then(data => {
     if (data.controllers.length > 0) {
@@ -37,7 +34,6 @@ si.graphics()
   })
   .catch(err => console.error("GPU Detection failed:", err));
 
-// --- LIVE TELEMETRY ENGINE ---
 let previousCpuInfo = getCpuInfo();
 
 function getCpuInfo() {
@@ -53,15 +49,11 @@ function getCpuInfo() {
   return { idle, total };
 }
 
-// --- PERSISTENT STORAGE for completed jobs ---
 const userDataPath = app.getPath("userData");
 const jobsFilePath = path.join(userDataPath, "completed-jobs.json");
 
 export function registerSystemAPIs() {
   
-  // =========================================================
-  // NATIVE WINDOWS FILE PICKER
-  // =========================================================
   ipcMain.handle("select-files", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: "Select Videos to Compress",
@@ -80,9 +72,6 @@ export function registerSystemAPIs() {
     });
   });
 
-  // =========================================================
-  // ENHANCED HARDWARE TELEMETRY (with CPU model & GPU usage)
-  // =========================================================
   ipcMain.handle("get-system-stats", async () => {
     const freeRam = os.freemem();
     const usedRamGb = (os.totalmem() - freeRam) / (1024 ** 3);
@@ -114,9 +103,6 @@ export function registerSystemAPIs() {
     };
   });
   const workspacePath = path.join(app.getPath('userData'), 'videobake_workspace.json');
-  // =========================================================
-  // PERSISTENT JOB STORAGE
-  // =========================================================
   ipcMain.handle("save-completed-jobs", async (event, jobs: any[]) => {
     try {
       const data = JSON.stringify(jobs, null, 2);
@@ -216,7 +202,6 @@ ipcMain.handle('select-folder', async () => {
   });
 
 
-  // 3. Audio File Picker
   ipcMain.handle('select-audio', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -225,7 +210,6 @@ ipcMain.handle('select-folder', async () => {
     return canceled ? null : filePaths[0];
   });
 
-  // 4. Shutdown PC
   ipcMain.handle('shutdown-pc', () => {
     console.log("[AUTOMATION] Shutting down PC in 10 seconds...");
     if (process.platform === 'win32') exec('shutdown /s /t 10');

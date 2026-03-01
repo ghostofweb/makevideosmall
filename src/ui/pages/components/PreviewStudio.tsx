@@ -322,9 +322,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
             <Button
               size="lg"
               className="w-full h-12 md:h-14 text-sm md:text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(99,102,241,0.4)]"
-              onClick={() => onEncode(selectedPreset)} // 🔴 Cleaned this up! Just triggers the modal now.
-            >
-              <Zap className="w-4 h-4 md:w-5 md:h-5 mr-2 fill-current" /> ENGAGE MASTER ENCODE
+              >ENGAGE MASTER ENCODE
             </Button>
           </div>
         </motion.div>

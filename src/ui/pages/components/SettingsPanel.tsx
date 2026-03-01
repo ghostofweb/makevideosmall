@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
-import { toast } from 'sonner'; // <-- Added for alerts
+import { toast } from 'sonner';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -56,7 +56,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     }
   };
 
-  // 🔴 NEW: Universal Open Folder Logic
   const handleOpenOutputFolder = () => {
     if (settings.outputRouting === 'custom' && settings.customOutputPath) {
       ipcRenderer.invoke('open-folder', settings.customOutputPath);
@@ -96,9 +95,6 @@ className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border s
 
             <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
               
-              {/* ===================================== */}
-              {/* OUTPUT ROUTING */}
-              {/* ===================================== */}
               <div className="space-y-4">
                 <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-2">
                   <HardDrive className="w-3.5 h-3.5" /> Output Routing
@@ -140,7 +136,6 @@ className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border s
                   </div>
                 </RadioGroup>
 
-                {/* 🔴 THE BIG PROMINENT OPEN FOLDER BUTTON */}
                 <Button 
                   variant="secondary" 
                   className="w-full flex items-center gap-2 mt-2 bg-secondary/60 hover:bg-secondary border border-border/50"
@@ -152,9 +147,6 @@ className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border s
 
               </div>
 
-              {/* ===================================== */}
-              {/* HARDWARE GUARDRAILS */}
-              {/* ===================================== */}
               <div className="space-y-4">
                 <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-2">
                   <Cpu className="w-3.5 h-3.5" /> Hardware Guardrails
@@ -175,9 +167,7 @@ className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border s
                 </div>
               </div>
 
-              {/* ===================================== */}
-              {/* AUTOMATION */}
-              {/* ===================================== */}
+
               <div className="space-y-4">
                 <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-2">
                   <Power className="w-3.5 h-3.5" /> Automation
