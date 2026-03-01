@@ -1,40 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ChevronLeft,
-  Terminal,
-  Server,
-  Cpu,
-  Shield,
-  Zap,
-  ListVideo,
-  CheckCircle2,
-  Loader2,
-  PlayCircle,
-  XCircle,
-  FolderOpen,
-  Trash2,
-  X,
-  StopCircle
+  ChevronLeft, Terminal, Server, Cpu, Shield, Zap, ListVideo, 
+  CheckCircle2, Loader2, PlayCircle, XCircle, FolderOpen, Trash2, X, StopCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-// shadcn/ui
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-// Recharts for live graphs
 import { LineChart, Line, ResponsiveContainer, Area, AreaChart } from 'recharts';
-
 import { type QueuedFile } from '../types';
 
 const { ipcRenderer } = window.require('electron');
@@ -51,51 +30,36 @@ interface QueueProps {
 export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancelJob, onBack }: QueueProps) {
   const [showTerminal, setShowTerminal] = useState(false);
   const [telemetry, setTelemetry] = useState<{ time: string; cpu: number; ram: number; fps: number }[]>([]);
-  
-  // Auto-scroll ref for the terminal
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
-  // Identify current job
   const activeJob =
     activeJobs.find((j) => j.queueState === 'processing') ||
     activeJobs.find((j) => j.queueState === 'ingest') ||
     activeJobs[activeJobs.length - 1];
 
-  // Auto-scroll the terminal whenever new logs arrive
   useEffect(() => {
     if (showTerminal && terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [activeJob?.logs, showTerminal]);
 
-  // Telemetry updates
   useEffect(() => {
     const handleTelemetry = (_event: any, data: any) => {
       if (data.type === 'telemetry') {
         setTelemetry((prev) => {
           const newPoint = {
             time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            cpu: data.cpu || 0,
-            ram: data.ram || 0,
-            fps: data.fps || 0,
+            cpu: data.cpu || 0, ram: data.ram || 0, fps: data.fps || 0,
           };
           return [...prev.slice(-19), newPoint];
         });
       }
     };
 
-    if (ipcRenderer) {
-      ipcRenderer.on('encode-telemetry', handleTelemetry);
-    }
-
-    return () => {
-      if (ipcRenderer) {
-        ipcRenderer.removeListener('encode-telemetry', handleTelemetry);
-      }
-    };
+    if (ipcRenderer) ipcRenderer.on('encode-telemetry', handleTelemetry);
+    return () => { if (ipcRenderer) ipcRenderer.removeListener('encode-telemetry', handleTelemetry); };
   }, []);
 
-  // --- FILE MANAGEMENT HANDLERS ---
   const handleOpenLocation = async (job: any) => {
     const targetPath = job.outputPath || job.path;
     await ipcRenderer.invoke('open-file-location', targetPath);
@@ -107,16 +71,13 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
       const res = await ipcRenderer.invoke('delete-physical-file', path);
       if (res.success) {
         toast.success("File deleted from disk.");
-        // This removes it from the queue visually immediately!
         removeFile(id); 
       } else {
         toast.error("Failed to delete file from disk.");
       }
     }
   };
-  // -------------------------------------
 
-  // Circular progress calculation
   const radius = 120;
   const circumference = 2 * Math.PI * radius;
   const progress = activeJob ? activeJob.progress : 0;
@@ -130,21 +91,17 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
       exit={{ opacity: 0, scale: 0.98 }}
       className="flex-1 flex flex-col overflow-hidden relative z-20"
     >
-      {/* Header */}
       <div className="flex items-center gap-3 mb-4 shrink-0">
         <Button variant="ghost" size="icon" onClick={onBack}>
           <ChevronLeft className="h-5 w-5" />
         </Button>
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
           <Server className="text-primary w-5 h-5" />
-          Telemetry Command Center
+          Processing Queue
         </h1>
       </div>
 
-      {/* 3‑column layout */}
       <div className="flex-1 flex gap-4 overflow-hidden pb-2">
-        
-        {/* Left: Job Roster */}
         <Card className="w-1/4 bg-card/50 border-border/50 flex flex-col">
           <CardHeader className="py-3 px-4">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -176,7 +133,10 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{job.name}</p>
+                        {/* 🔴 FIX: Prioritize customName over original name! */}
+                        <p className="text-xs font-medium truncate" title={job.customName || job.name}>
+                          {job.customName || job.name}
+                        </p>
                         <p className="text-[10px] text-muted-foreground">
                           {job.queueState === 'completed'
                             ? 'Completed'
@@ -188,11 +148,8 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                         </p>
                       </div>
 
-                      {/* THE ACTION BUTTONS MENU */}
                       <TooltipProvider delayDuration={150}>
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200 shrink-0 bg-background/80 backdrop-blur-md rounded-md border border-border/50 p-0.5 shadow-lg translate-x-2 group-hover:translate-x-0">
-                          
-                          {/* 🔴 ABORT BUTTON */}
                           {(job.queueState === 'processing' || job.queueState === 'queued') && (
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -211,7 +168,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                             </Tooltip>
                           )}
 
-                          {/* 📁 FOLDER BUTTON */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
@@ -228,7 +184,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                             </TooltipContent>
                           </Tooltip>
 
-                          {/* ❌ CLEAR BUTTON */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
@@ -245,7 +200,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                             </TooltipContent>
                           </Tooltip>
 
-                          {/* 🗑️ DELETE PHYSICAL FILE BUTTON */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
@@ -261,7 +215,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                               Delete Original File from Disk
                             </TooltipContent>
                           </Tooltip>
-
                         </div>
                       </TooltipProvider>
 
@@ -278,30 +231,16 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           </CardContent>
         </Card>
 
-        {/* Center: Main HUD */}
         <Card className="flex-1 bg-card/30 border-border/50 relative flex flex-col items-center justify-center overflow-hidden">
           {activeJob ? (
             <>
-              {/* Big circular progress */}
               <div className="relative flex items-center justify-center my-4">
                 <svg className="transform -rotate-90 w-64 h-64">
-                  <circle
-                    cx="128"
-                    cy="128"
-                    r={radius}
-                    stroke="currentColor"
-                    strokeWidth="10"
-                    fill="transparent"
-                    className="text-white/5"
-                  />
+                  <circle cx="128" cy="128" r={radius} stroke="currentColor" strokeWidth="10" fill="transparent" className="text-white/5" />
                   <motion.circle
-                    cx="128"
-                    cy="128"
-                    r={radius}
+                    cx="128" cy="128" r={radius}
                     stroke={activeJob.queueState === 'completed' ? '#22c55e' : '#6366f1'}
-                    strokeWidth="10"
-                    fill="transparent"
-                    strokeDasharray={circumference}
+                    strokeWidth="10" fill="transparent" strokeDasharray={circumference}
                     animate={{ strokeDashoffset: dashOffset }}
                     transition={{ duration: 0.5, ease: 'linear' }}
                     strokeLinecap="round"
@@ -312,17 +251,12 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                   <span className="text-4xl font-black text-foreground">
                     {progress.toFixed(0)}<span className="text-xl text-primary">%</span>
                   </span>
-                  <span
-                    className={`text-xs font-bold uppercase mt-1 ${
-                      activeJob.queueState === 'completed' ? 'text-green-400' : 'text-primary animate-pulse'
-                    }`}
-                  >
+                  <span className={`text-xs font-bold uppercase mt-1 ${activeJob.queueState === 'completed' ? 'text-green-400' : 'text-primary animate-pulse'}`}>
                     {activeJob.queueState === 'completed' ? 'Idle' : 'Encoding'}
                   </span>
                 </div>
               </div>
 
-              {/* ETA and logs toggle */}
               <div className="flex items-center gap-4 mt-2">
                 <div className="bg-black/40 px-4 py-2 rounded-lg border border-white/5 backdrop-blur-sm text-center">
                   <p className="text-[10px] text-muted-foreground uppercase">ETA</p>
@@ -334,15 +268,12 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                 </Button>
               </div>
 
-              {/* Terminal overlay */}
               <AnimatePresence>
                 {showTerminal && (
                   <motion.div
-                    initial={{ y: '100%' }}
-                    animate={{ y: 0 }}
-                    exit={{ y: '100%' }}
+                    initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                     transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                    className="absolute bottom-0 left-0 right-0 h-1/2 bg-black/95 border-t border-border backdrop-blur-md flex flex-col z-20"
+                    className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border shadow-2xl z-50 flex flex-col pt-12"
                   >
                     <div className="flex items-center justify-between px-3 py-1.5 bg-black/60 border-b border-white/10 shrink-0">
                       <div className="flex items-center gap-2">
@@ -353,7 +284,6 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                         <XCircle className="w-3 h-3" />
                       </Button>
                     </div>
-                    {/* Replaced ScrollArea with standard overflow-y-auto div for proper scrolling */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-3 font-mono text-[10px]">
                       {activeJob.logs?.map((log, i) => (
                         <div key={i} className="text-green-400/80 whitespace-pre-wrap mb-1">
@@ -362,13 +292,8 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                         </div>
                       ))}
                       {activeJob.queueState !== 'completed' && (
-                        <motion.span
-                          animate={{ opacity: [1, 0] }}
-                          transition={{ repeat: Infinity, duration: 0.8 }}
-                          className="inline-block w-2 h-3 bg-green-400 mt-1 ml-1"
-                        />
+                        <motion.span animate={{ opacity: [1, 0] }} transition={{ repeat: Infinity, duration: 0.8 }} className="inline-block w-2 h-3 bg-green-400 mt-1 ml-1" />
                       )}
-                      {/* This invisible div is what we auto-scroll down to! */}
                       <div ref={terminalEndRef} />
                     </div>
                   </motion.div>
@@ -380,20 +305,16 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           )}
         </Card>
 
-        {/* Right: Live Telemetry */}
         <div className="w-1/4 flex flex-col gap-3">
           <Card className="bg-card/40 border-border/50">
             <CardHeader className="py-2 px-3">
               <CardTitle className="text-xs font-medium flex items-center gap-1">
-                <Cpu className="w-3 h-3 text-indigo-400" />
-                CPU Load
+                <Cpu className="w-3 h-3 text-indigo-400" /> CPU Load
               </CardTitle>
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div className="flex items-end gap-1">
-                <span className="text-2xl font-mono font-bold">
-                  {telemetry.length ? telemetry[telemetry.length - 1].cpu.toFixed(1) : '—'}%
-                </span>
+                <span className="text-2xl font-mono font-bold">{telemetry.length ? telemetry[telemetry.length - 1].cpu.toFixed(1) : '—'}%</span>
                 <span className="text-xs text-muted-foreground mb-1">/ 12 cores</span>
               </div>
               <div className="h-16 mt-2" style={{ minHeight: '64px' }}>
@@ -415,22 +336,15 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           <Card className="bg-card/40 border-white/5">
             <CardHeader className="py-2 px-3">
               <CardTitle className="text-xs font-medium flex items-center gap-1">
-                <Shield className="w-3 h-3 text-green-400" />
-                RAM Shield
+                <Shield className="w-3 h-3 text-green-400" /> RAM Shield
               </CardTitle>
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div className="flex items-end gap-1">
-                <span className="text-2xl font-mono font-bold">
-                  {telemetry.length ? telemetry[telemetry.length - 1].ram.toFixed(1) : '—'}
-                </span>
+                <span className="text-2xl font-mono font-bold">{telemetry.length ? telemetry[telemetry.length - 1].ram.toFixed(1) : '—'}</span>
                 <span className="text-xs text-muted-foreground mb-1">GB</span>
               </div>
-              <Progress
-                value={((telemetry[telemetry.length - 1]?.ram || 0) / 12) * 100}
-                className="h-1.5 mt-2"
-                indicatorClassName="bg-green-400"
-              />
+              <Progress value={((telemetry[telemetry.length - 1]?.ram || 0) / 12) * 100} className="h-1.5 mt-2" indicatorClassName="bg-green-400" />
               <p className="text-[10px] text-green-400/60 mt-1">Protected Mode: ON</p>
             </CardContent>
           </Card>
@@ -438,15 +352,12 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           <Card className="bg-card/40 border-white/5">
             <CardHeader className="py-2 px-3">
               <CardTitle className="text-xs font-medium flex items-center gap-1">
-                <Zap className="w-3 h-3 text-yellow-400" />
-                Throughput
+                <Zap className="w-3 h-3 text-yellow-400" /> Throughput
               </CardTitle>
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div className="flex items-end gap-1">
-                <span className="text-2xl font-mono font-bold">
-                  {telemetry.length ? telemetry[telemetry.length - 1].fps.toFixed(1) : '—'}
-                </span>
+                <span className="text-2xl font-mono font-bold">{telemetry.length ? telemetry[telemetry.length - 1].fps.toFixed(1) : '—'}</span>
                 <span className="text-xs text-muted-foreground mb-1">FPS</span>
               </div>
               <div className="h-16 mt-2" style={{ minHeight: '64px' }}>

@@ -1,7 +1,7 @@
-import { BrainCircuit, Settings, Sun, Moon } from 'lucide-react';
+import { BrainCircuit, Settings, Sun, Moon, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from 'next-themes';
-
+import logo from '../../../../public/logo-white.svg'
 interface HeaderProps {
   onOpenSettings: () => void;
 }
@@ -11,12 +11,13 @@ export function Header({ onOpenSettings }: HeaderProps) {
 
   return (
     <header
-      className="flex justify-between items-center px-6 py-3 bg-background/80 backdrop-blur-md border-b border-border select-none z-30"
+      // 🔴 FIX: Changed `py-3` to `pb-3 pt-10` to push content below the OS controls!
+      className="flex justify-between items-center px-6 pb-3 pt-10 bg-background/80 backdrop-blur-md border-b border-border select-none z-30"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <div className="flex items-center gap-2">
-        <BrainCircuit className="text-primary w-5 h-5" />
-        <h1 className="text-sm font-semibold tracking-wide text-foreground/90">Cognitive Encoder</h1>
+        <img src={logo} className="w-12 h-12" />
+        <h1 className="text-sm font-semibold tracking-wide text-foreground/90">Make Video Small</h1>
       </div>
 
       <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' }}>

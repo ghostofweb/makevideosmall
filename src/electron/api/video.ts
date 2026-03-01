@@ -116,12 +116,12 @@ export function registerVideoAPIs() {
     });
   });
 
-  ipcMain.handle("start-encode", async (event, { fileId, inputPath, preset, previewsToDelete, settings }) => {
+  ipcMain.handle("start-encode", async (event, { fileId, inputPath, preset, previewsToDelete, settings, customFileName }) => {
     
     // 1. Create an output path (e.g., "MyVideo_AV1.mp4")
     const parsedPath = path.parse(inputPath);
-    let outputPath = path.join(parsedPath.dir, `${parsedPath.name}_AV1${parsedPath.ext}`);
-
+   const finalName = customFileName ? customFileName : `${parsedPath.name}_AV1`;
+    let outputPath = path.join(parsedPath.dir, `${finalName}${parsedPath.ext}`);
     // If custom routing is enabled and a path exists, override it!
     if (settings?.outputRouting === 'custom' && settings?.customOutputPath) {
       outputPath = path.join(settings.customOutputPath, `${parsedPath.name}_AV1${parsedPath.ext}`);

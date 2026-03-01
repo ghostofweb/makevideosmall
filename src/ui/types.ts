@@ -18,6 +18,7 @@ export interface QueuedFile {
     completedAt?: number;
     previewData?: any;      // Holds the AI JSON from Python
   outputPath?: string;
+  customName?: string;
 }
 
 // Extend File to include optional `path` for Electron

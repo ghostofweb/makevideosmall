@@ -1,12 +1,11 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, SlidersHorizontal, CheckCircle2, Zap, Sparkles, Activity, FileVideo, AlertCircle } from 'lucide-react';
+import { ChevronLeft, SlidersHorizontal, CheckCircle2, Zap, Activity, FileVideo, AlertCircle } from 'lucide-react';
 import { ReactCompareSlider } from 'react-compare-slider';
 import { useState, useRef, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton'; 
 
 interface PreviewStudioProps {
   file: any;
@@ -24,7 +23,6 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
 
   const payload = file?.previewData;
 
-  // Synchronize both videos
   useEffect(() => {
     const orig = videoRefOriginal.current;
     const comp = videoRefCompressed.current;
@@ -42,7 +40,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
       }
     };
 
-    const interval = setInterval(syncVideos, 300); // more frequent for tighter sync
+    const interval = setInterval(syncVideos, 300);
 
     const onLoop = () => {
       setTimeout(() => {
@@ -62,9 +60,8 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
       orig.removeEventListener('ended', onLoop);
       comp.removeEventListener('ended', onLoop);
     };
-  }, []); // dependencies left empty because refs are stable
+  }, []);
 
-  // Reset on preset change
   useEffect(() => {
     const orig = videoRefOriginal.current;
     const comp = videoRefCompressed.current;
@@ -106,25 +103,20 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
   const { dna, videos } = payload;
   const estimates = videos.previews;
 
-  // Build file URL with proper encoding for Windows
   const formatVidPath = (path: string) => {
     if (!path) return '';
     let normalized = path.replace(/\\/g, '/');
     if (!normalized.startsWith('/')) normalized = '/' + normalized;
-    return `file://${encodeURI(normalized)}`; // encode to handle spaces
+    return `file://${encodeURI(normalized)}`; 
   };
 
   const origVid = formatVidPath(videos.original);
   const currentPreviewVid = formatVidPath(estimates[selectedPreset].video_path);
   const activeStats = estimates[selectedPreset];
 
-  // Staggered animation variants for preset cards
   const containerVariants = {
     hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 },
-    },
+    show: { opacity: 1, transition: { staggerChildren: 0.1 } },
   };
   const itemVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -137,10 +129,8 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      // DESKTOP FOUNDATION: Strict flex-col bounded to window bounds
       className="absolute inset-0 z-40 bg-background flex flex-col p-4 sm:p-6 gap-4 sm:gap-6 overflow-hidden"
     >
-      {/* Animated background gradient */}
       <motion.div
         className="fixed inset-0 pointer-events-none opacity-20"
         animate={{
@@ -153,7 +143,6 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
         transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
       />
 
-      {/* Header - Shrink 0 ensures it never gets crushed vertically */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -173,15 +162,12 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
         </div>
       </motion.div>
 
-      {/* Main content split - Flex 1 takes remaining height. min-h-0 prevents flex overflow issues. */}
       <div className="relative z-10 flex-1 flex flex-col md:flex-row gap-4 sm:gap-6 min-h-0 overflow-hidden">
         
-        {/* LEFT: Compare Slider */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          // Scales perfectly. min-h constraints prevent the video from breaking if the user makes window tiny
           className="flex-1 flex flex-col min-h-[200px] sm:min-h-[300px] rounded-2xl overflow-hidden bg-black/40 border border-border/50 shadow-2xl relative"
         >
           <ReactCompareSlider
@@ -191,11 +177,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
                 <video
                   ref={videoRefOriginal}
                   src={origVid}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  preload="auto"
+                  autoPlay loop muted playsInline preload="auto"
                   className="w-full h-full object-contain"
                   onLoadedData={() => setVideosLoaded(prev => ({ ...prev, orig: true }))}
                   onError={(e) => {
@@ -216,11 +198,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
                   ref={videoRefCompressed}
                   src={currentPreviewVid}
                   key={selectedPreset}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  preload="auto"
+                  autoPlay loop muted playsInline preload="auto"
                   className="w-full h-full object-contain"
                   onLoadedData={() => setVideosLoaded(prev => ({ ...prev, comp: true }))}
                   onError={(e) => {
@@ -236,8 +214,6 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
               </div>
             }
           />
-
-          {/* Badges */}
           <div className="absolute top-4 left-4 right-4 flex justify-between pointer-events-none z-10">
             <Badge variant="secondary" className="bg-black/80 text-white/90 border-white/10 backdrop-blur-md shadow-lg">
               Original
@@ -246,8 +222,6 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
               AV1 (CRF {activeStats.crf_used})
             </Badge>
           </div>
-
-          {/* Error overlay */}
           {videoErrors.length > 0 && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-destructive/90 text-destructive-foreground text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-lg z-20">
               <AlertCircle className="w-4 h-4" />
@@ -256,23 +230,17 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
           )}
         </motion.div>
 
-        {/* RIGHT: AI Data Panel */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.3 }}
-          // Fixed desktop width. Flex-col handles internal scrolling cleanly.
           className="w-full md:w-96 shrink-0 flex flex-col h-full min-h-0"
         >
-          {/* SCROLLABLE INNER AREA */}
-          {/* This allows the DNA card and presets to scroll if the app window is too short vertically */}
           <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 pr-2">
-            
-            {/* DNA Card */}
             <Card className="border-border/50 bg-card/70 backdrop-blur-sm shadow-md shrink-0">
               <CardContent className="p-5">
                 <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold mb-4 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
+                  <Activity className="w-4 h-4 text-purple-400" />
                   AI Treatment Plan
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -296,25 +264,15 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
                     <p className="text-muted-foreground text-[10px]">SENSOR CLONE</p>
                     <p className="text-indigo-400 font-bold truncate">{dna.noise_profile}</p>
                   </div>
-                  <div className="col-span-1 sm:col-span-2 space-y-1">
-                    <p className="text-muted-foreground text-[10px]">AUDIO</p>
-                    <p className="font-mono font-bold truncate">{dna.a_codec.toUpperCase()} · {dna.a_channels} channels</p>
-                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Preset Selector */}
             <div className="space-y-3 shrink-0">
               <h3 className="text-xs uppercase tracking-widest text-muted-foreground font-bold ml-1 flex items-center gap-2">
                 <Zap className="w-4 h-4 text-yellow-400" /> Target Profile
               </h3>
-              <motion.div
-                variants={containerVariants}
-                initial="hidden"
-                animate="show"
-                className="space-y-3"
-              >
+              <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-3">
                 {['max', 'balanced', 'fast'].map((key) => {
                   const presetData = estimates[key];
                   const isSelected = selectedPreset === key;
@@ -328,13 +286,11 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
                     <motion.div
                       key={key}
                       variants={itemVariants}
-                      whileHover={{ scale: 1.02, transition: { type: 'spring', stiffness: 400 } }}
+                      whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => setSelectedPreset(key)}
                       className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 
-                        ${isSelected
-                          ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
-                          : 'border-border/50 bg-card/50 hover:border-border hover:bg-card/80'}`}
+                        ${isSelected ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-border/50 bg-card/50 hover:border-border hover:bg-card/80'}`}
                     >
                       <div className="flex flex-col gap-1">
                         <span className={`font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
@@ -351,12 +307,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
                         </span>
                       </div>
                       {isSelected && (
-                        <motion.div
-                          initial={{ scale: 0, rotate: -180 }}
-                          animate={{ scale: 1, rotate: 0 }}
-                          transition={{ type: 'spring', stiffness: 300 }}
-                          className="absolute right-4"
-                        >
+                        <motion.div initial={{ scale: 0, rotate: -180 }} animate={{ scale: 1, rotate: 0 }} className="absolute right-4">
                           <CheckCircle2 className="w-6 h-6 text-primary" />
                         </motion.div>
                       )}
@@ -367,33 +318,15 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
             </div>
           </div>
 
-          {/* FIXED BOTTOM ACTION BUTTON */}
-          {/* Shrink-0 keeps it anchored perfectly below the scrollable content. */}
           <div className="shrink-0 pt-4 mt-4 lg:mt-2 border-t border-border/30 sticky bottom-0 bg-background/95 backdrop-blur-sm lg:static lg:bg-transparent lg:backdrop-blur-none z-20 pb-2 lg:pb-0">
-  <Button
-    size="lg"
-    className="w-full h-12 md:h-14 text-sm md:text-base font-bold bg-gradient-to-r from-primary to-purple-600..."
-    onClick={() => {
-onEncode(selectedPreset);
-      const crfToUse = estimates[selectedPreset].crf_used;
-      
-      // 2. Send payload to Electron Main via your preload script
-      window.electron.ipcRenderer.send('add-to-queue', {
-        id: file.id,
-        path: file.path,
-        preset: selectedPreset,
-        crf: crfToUse,
-        duration: dna.duration_seconds // Required for accurate ETA calculation in Python
-      });
-
-      // 3. Close the studio and switch to the Queue view
-      onBack(); 
-    }}
-  >
-    <Zap className="w-4 h-4 md:w-5 md:h-5 mr-2 fill-current" /> ENGAGE MASTER ENCODE
-  </Button>
-</div>
-
+            <Button
+              size="lg"
+              className="w-full h-12 md:h-14 text-sm md:text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(99,102,241,0.4)]"
+              onClick={() => onEncode(selectedPreset)} // 🔴 Cleaned this up! Just triggers the modal now.
+            >
+              <Zap className="w-4 h-4 md:w-5 md:h-5 mr-2 fill-current" /> ENGAGE MASTER ENCODE
+            </Button>
+          </div>
         </motion.div>
       </div>
     </motion.div>

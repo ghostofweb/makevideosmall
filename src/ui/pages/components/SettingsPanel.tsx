@@ -86,8 +86,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border shadow-2xl z-50 flex flex-col"
-          >
+className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border shadow-2xl z-50 flex flex-col pt-8"          >
             <div className="flex justify-between items-center p-4 border-b border-border/50">
               <h2 className="text-sm font-bold text-foreground">Global Settings</h2>
               <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6">
