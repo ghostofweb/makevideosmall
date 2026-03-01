@@ -1,23 +1,34 @@
 {
-  "appId": "com.sahil.ai-therapist",
-  "productName": "AI Therapist",
+  "appId": "com.ghostofweb.makevideosmall",
+  "productName": "MakeVideoSmall",
+  "directories": {
+    "output": "dist-installers",
+    "buildResources": "public"
+  },
   "files": [
     "dist-electron/**/*",
     "dist-react/**/*",
     "package.json"
   ],
-  "directories": {
-    "output": "dist"
-  },
-  "icon": "./logo.png",
+  "extraResources": [
+    {
+      "from": "engine",
+      "to": "engine",
+      "filter": ["**/*"]
+    }
+  ],
   "win": {
-    "target": ["portable", "msi"]
+    "target": ["nsis"],
+    "icon": "public/logo.ico"
   },
-  "mac": {
-    "target": "dmg"
-  },
-  "linux": {
-    "target": "AppImage",
-    "category": "Utility"
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "license": "license.txt",
+    "installerIcon": "public/logo.ico",
+    "uninstallerIcon": "public/logo.ico",
+    "artifactName": "${productName}_Setup_v${version}.${ext}"
   }
 }

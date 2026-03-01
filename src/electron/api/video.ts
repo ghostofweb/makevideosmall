@@ -164,6 +164,8 @@ export function registerVideoAPIs() {
       PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
     };
 
+    // 🔴 THE FIX: Redefined totalThreads here so it's available in this scope!
+    const totalThreads = os.cpus().length;
     const freeThreads = settings?.freeCpuCores ?? 2; 
     const threadsToUse = Math.max(1, totalThreads - freeThreads).toString();
 

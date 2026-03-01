@@ -102,8 +102,9 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden pb-2">
-        <Card className="w-1/4 bg-card/50 border-border/50 flex flex-col">
-          <CardHeader className="py-3 px-4">
+        {/* Left: Job Roster */}
+        <Card className="w-1/4 bg-card/50 border-border/50 flex flex-col min-w-[280px]">
+          <CardHeader className="py-3 px-4 shrink-0">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <ListVideo className="w-4 h-4 text-muted-foreground" />
               Job Roster
@@ -230,10 +231,11 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           </CardContent>
         </Card>
 
+        {/* Center: Main HUD */}
         <Card className="flex-1 bg-card/30 border-border/50 relative flex flex-col items-center justify-center overflow-hidden">
           {activeJob ? (
             <>
-              <div className="relative flex items-center justify-center my-4">
+              <div className="relative flex items-center justify-center my-4 transition-transform duration-300">
                 <svg className="transform -rotate-90 w-64 h-64">
                   <circle cx="128" cy="128" r={radius} stroke="currentColor" strokeWidth="10" fill="transparent" className="text-white/5" />
                   <motion.circle
@@ -256,44 +258,48 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 mt-2">
+              <div className="flex items-center gap-4 mt-2 mb-4 z-10 relative">
                 <div className="bg-black/40 px-4 py-2 rounded-lg border border-white/5 backdrop-blur-sm text-center">
                   <p className="text-[10px] text-muted-foreground uppercase">ETA</p>
                   <p className="text-sm font-mono">{activeJob.eta}</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setShowTerminal(!showTerminal)}>
+                <Button variant="outline" size="sm" onClick={() => setShowTerminal(!showTerminal)} className="bg-background/50 backdrop-blur-sm">
                   <Terminal className="w-3 h-3 mr-1" />
                   {showTerminal ? 'Hide' : 'Show'} Terminal
                 </Button>
               </div>
 
+              {/* 🔴 THE FIX: Properly contained absolute overlay */}
               <AnimatePresence>
                 {showTerminal && (
                   <motion.div
                     initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                     transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                    className="fixed top-0 right-0 h-full w-[340px] bg-card border-l border-border shadow-2xl z-50 flex flex-col pt-12"
+                    // Strict absolute positioning constrained to the parent Card!
+                    className="absolute bottom-0 left-0 right-0 h-[60%] bg-black/95 border-t border-border/50 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] flex flex-col z-30"
                   >
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-black/60 border-b border-white/10 shrink-0">
+                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/80 border-b border-white/5 shrink-0">
                       <div className="flex items-center gap-2">
-                        <Terminal className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-[10px] font-mono uppercase text-muted-foreground">Raw Output</span>
+                        <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Engine Output</span>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowTerminal(false)}>
-                        <XCircle className="w-3 h-3" />
+                      <Button variant="ghost" size="icon" className="h-6 w-6 hover:bg-white/10 hover:text-white" onClick={() => setShowTerminal(false)}>
+                        <X className="w-3.5 h-3.5" />
                       </Button>
                     </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 font-mono text-[10px]">
+                    
+                    {/* Log text area */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 font-mono text-[11px] leading-relaxed">
                       {activeJob.logs?.map((log, i) => (
-                        <div key={i} className="text-green-400/80 whitespace-pre-wrap mb-1">
-                          <span className="text-blue-400/60 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                        <div key={i} className="text-green-400/90 whitespace-pre-wrap break-all mb-1">
+                          <span className="text-blue-400/60 mr-2 select-none">[{new Date().toLocaleTimeString()}]</span>
                           {log}
                         </div>
                       ))}
                       {activeJob.queueState !== 'completed' && (
                         <motion.span animate={{ opacity: [1, 0] }} transition={{ repeat: Infinity, duration: 0.8 }} className="inline-block w-2 h-3 bg-green-400 mt-1 ml-1" />
                       )}
-                      <div ref={terminalEndRef} />
+                      <div ref={terminalEndRef} className="h-4" /> {/* Padding so last line isn't cut off */}
                     </div>
                   </motion.div>
                 )}
@@ -304,7 +310,8 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
           )}
         </Card>
 
-        <div className="w-1/4 flex flex-col gap-3">
+        {/* Right: Live Telemetry */}
+        <div className="w-1/4 flex flex-col gap-3 min-w-[240px]">
           <Card className="bg-card/40 border-border/50">
             <CardHeader className="py-2 px-3">
               <CardTitle className="text-xs font-medium flex items-center gap-1">
@@ -343,23 +350,23 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                 <span className="text-2xl font-mono font-bold">{telemetry.length ? telemetry[telemetry.length - 1].ram.toFixed(1) : '—'}</span>
                 <span className="text-xs text-muted-foreground mb-1">GB</span>
               </div>
-              <Progress value={((telemetry[telemetry.length - 1]?.ram || 0) / 12) * 100} className="h-1.5 mt-2" indicatorClassName="bg-green-400" />
+              <Progress value={((telemetry[telemetry.length - 1]?.ram || 0) / 12) * 100} className="h-1.5 mt-2" />
               <p className="text-[10px] text-green-400/60 mt-1">Protected Mode: ON</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-card/40 border-white/5">
-            <CardHeader className="py-2 px-3">
+          <Card className="bg-card/40 border-white/5 flex-1 flex flex-col">
+            <CardHeader className="py-2 px-3 shrink-0">
               <CardTitle className="text-xs font-medium flex items-center gap-1">
                 <Zap className="w-3 h-3 text-yellow-400" /> Throughput
               </CardTitle>
             </CardHeader>
-            <CardContent className="px-3 pb-3">
+            <CardContent className="px-3 pb-3 flex-1 flex flex-col justify-end">
               <div className="flex items-end gap-1">
                 <span className="text-2xl font-mono font-bold">{telemetry.length ? telemetry[telemetry.length - 1].fps.toFixed(1) : '—'}</span>
                 <span className="text-xs text-muted-foreground mb-1">FPS</span>
               </div>
-              <div className="h-16 mt-2" style={{ minHeight: '64px' }}>
+              <div className="h-16 mt-2 shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={telemetry}>
                     <Line type="monotone" dataKey="fps" stroke="#fbbf24" strokeWidth={2} dot={false} />

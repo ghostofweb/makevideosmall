@@ -39,7 +39,7 @@ app.on("ready", () => {
     height: 1080,
     minWidth: 1024,
     minHeight: 700,
-    title: "VideoBake Studio",
+    title: "MakeVideoSmall",
     icon: getIconPath(),
     backgroundColor: '#09090b',
     autoHideMenuBar: true,
@@ -68,10 +68,10 @@ app.on("ready", () => {
     mainWindow.show();
     mainWindow.focus();
   });
-
-  if (isDev() === "development") {
+  
+if (isDev()) {
     mainWindow.loadURL("http://localhost:5123/");
   } else {
-    mainWindow.loadFile(path.join(projectRoot, 'dist-react', 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, "..", "dist-react", "index.html"));
   }
 });

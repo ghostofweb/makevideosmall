@@ -1,4 +1,4 @@
-import { BrainCircuit, Settings, Sun, Moon, Image } from 'lucide-react';
+import { Settings, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from 'next-themes';
 import logo from '../../../../public/logo-white.svg'
@@ -19,7 +19,7 @@ export function Header({ onOpenSettings }: HeaderProps) {
         <h1 className="text-sm font-semibold tracking-wide text-foreground/90">Make Video Small</h1>
       </div>
 
-      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
+      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
         <Button
           variant="ghost"
           size="icon"

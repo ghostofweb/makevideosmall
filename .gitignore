@@ -13,6 +13,7 @@ dist-ssr
 *.local
 dist-electron
 # Editor directories and files
+dist-installers
 .vscode/*
 !.vscode/extensions.json
 .idea

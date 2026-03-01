@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ChevronLeft, SlidersHorizontal, CheckCircle2, Zap, Activity, FileVideo, AlertCircle } from 'lucide-react';
 import { ReactCompareSlider } from 'react-compare-slider';
 import { useState, useRef, useEffect } from 'react';
@@ -118,10 +118,10 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
     hidden: { opacity: 0 },
     show: { opacity: 1, transition: { staggerChildren: 0.1 } },
   };
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } },
-  };
+ const itemVariants : any = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } },
+};
 
   return (
     <motion.div
@@ -321,6 +321,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
           <div className="shrink-0 pt-4 mt-4 lg:mt-2 border-t border-border/30 sticky bottom-0 bg-background/95 backdrop-blur-sm lg:static lg:bg-transparent lg:backdrop-blur-none z-20 pb-2 lg:pb-0">
             <Button
               size="lg"
+              onClick={() => onEncode(selectedPreset)}
               className="w-full h-12 md:h-14 text-sm md:text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(99,102,241,0.4)]"
               >ENGAGE MASTER ENCODE
             </Button>

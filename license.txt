@@ -1,0 +1,15 @@
+END USER LICENSE AGREEMENT FOR MakeVideoSmall STUDIO
+
+1. ACCEPTANCE OF TERMS
+By installing and using MakeVideoSmall Studio, you agree to make your videos incredibly small without sacrificing visual quality. 
+
+2. HARDWARE USAGE
+You acknowledge that video encoding is an intensive process. MakeVideoSmall Studio will utilize your CPU and GPU to bake these videos to perfection, but will strictly obey the Hardware Guardrails you set within the application to prevent system freezes.
+
+3. AUTOMATION & FILE DELETION
+If you enable "Delete original" in the automation settings, the software will permanently delete your original source files from your hard drive after a successful encode. You accept full responsibility for enabling this feature.
+
+4. LIABILITY
+We are not responsible for how much free hard drive space you suddenly have after compressing your entire media library.
+
+Click "I Agree" to continue the installation and start baking!
