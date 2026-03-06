@@ -211,8 +211,8 @@ ipcMain.handle('select-folder', async () => {
   });
 
   ipcMain.handle('shutdown-pc', () => {
-    console.log("[AUTOMATION] Shutting down PC in 10 seconds...");
-    if (process.platform === 'win32') exec('shutdown /s /t 10');
+    console.log("[AUTOMATION] Executing OS Shutdown...");
+    if (process.platform === 'win32') exec('shutdown /s /t 0');
     else if (process.platform === 'darwin') exec('osascript -e \'tell app "System Events" to shut down\'');
     else exec('shutdown -h now');
   });

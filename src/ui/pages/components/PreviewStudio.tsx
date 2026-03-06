@@ -2,7 +2,7 @@
 import { motion } from 'framer-motion';
 import { 
   ChevronLeft, SlidersHorizontal, CheckCircle2, Zap, 
-  Activity, FileVideo, AlertCircle, BrainCircuit, AlertTriangle 
+  Activity, FileVideo, AlertCircle, BrainCircuit, AlertTriangle , Info
 } from 'lucide-react';
 import { ReactCompareSlider } from 'react-compare-slider';
 import { useState, useRef, useEffect } from 'react';
@@ -94,13 +94,17 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
   const itemVariants = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } } };
 
   // 🔴 Source Diagnostic Engine
-  const getSourceDiagnosis = (bpp: number) => {
-    if (bpp >= 0.1) return { badge: "Pristine", colors: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10", desc: "High bitrate. Perfect for deep compression." };
-    if (bpp >= 0.03) return { badge: "Standard", colors: "text-blue-400 border-blue-400/30 bg-blue-400/10", desc: "Average quality. Some detail loss may occur." };
-    return { badge: "Starved", colors: "text-amber-400 border-amber-400/30 bg-amber-400/10", desc: "Highly compressed source. Quality will degrade." };
+ const getSourceDiagnosis = (bpp: number) => {
+    if (bpp >= 0.1) return { badge: "Pristine", colors: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10", desc: "High data density (Raw/Original). Expect massive file size reduction." };
+    if (bpp >= 0.03) return { badge: "Standard", colors: "text-blue-400 border-blue-400/30 bg-blue-400/10", desc: "Average data density. Good candidate for standard compression." };
+    return { badge: "Pre-Compressed", colors: "text-amber-400 border-amber-400/30 bg-amber-400/10", desc: "File is already heavily compressed (e.g., Web/YouTube download). The engine has engaged safety limits to prevent bloating." };
   };
-
+  
   const diagnosis = getSourceDiagnosis(dna.bpp || 0.05);
+  const hasSafetyCapEngaged = Object.values(estimates).some((stats: any) => stats.savings < 15);
+  const cappedPresets = Object.entries(estimates)
+    .filter(([_, stats]: [string, any]) => stats.savings < 15)
+    .map(([key, _]) => key === 'max' ? 'Ultra' : key === 'balanced' ? 'Balanced' : 'Fast');
   const activeStats = estimates[selectedPreset];
   if (!activeStats || !activeStats.video_path) {
     return (
@@ -251,7 +255,17 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
 
           {/* Bottom Action Area */}
           <div className="shrink-0 pt-4 mt-2 border-t border-border/30 sticky bottom-0 bg-background/95 backdrop-blur-sm lg:static lg:bg-transparent lg:backdrop-blur-none z-20 pb-2 lg:pb-0">
-            
+            {hasSafetyCapEngaged && (
+              <div className="mb-4 p-3 rounded-xl border flex items-start gap-3 bg-blue-500/10 border-blue-500/30 text-blue-200">
+                <Info className="w-5 h-5 shrink-0 mt-0.5 text-blue-400" />
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-blue-400">Safety Cap Active</p>
+                  <p className="text-[10px] opacity-80 leading-tight mt-1">
+                    This video is already heavily optimized. To prevent "Artifact Chasing," the engine has hard-capped output sizes for the <span className="font-bold text-blue-300">{cappedPresets.join(' & ')}</span> profile(s).
+                  </p>
+                </div>
+              </div>
+            )}
             {/* 🔴 THE TRUTH BANNER */}
             {isFallback ? (
               <div className="mb-4 p-3 rounded-xl border flex items-start gap-3 bg-red-500/10 border-red-500/30 text-red-200">

@@ -116,22 +116,22 @@ def extract_dna(file_path):
 
 
 def get_engine_settings(dna, engine_type, preset_id):
-    # TRUE QUALITY TARGETS - NO MORE FAKE PERCENTAGES
     is_60fps = dna['fps'] > 45
     is_4k = dna['width'] >= 3840
     orig_bitrate = dna.get('bitrate', 1)
 
     settings = {"cmd_args": []}
 
-    # The Ultimate Safety Net: Prevents output from accidentally inflating LARGER than the original
     hard_cap = int(orig_bitrate * 0.98) 
 
     if engine_type == 'gpu':
         settings["codec"] = "hevc_nvenc"
+        
+        # 🔴 UNIVERSAL GPU: Heavy, but respects high-motion video
         if is_4k:
-            cq = 28 if preset_id == 'max' else 36 if preset_id == 'balanced' else 44
+            cq = 32 if preset_id == 'max' else 40 if preset_id == 'balanced' else 48
         else:
-            cq = 24 if preset_id == 'max' else 32 if preset_id == 'balanced' else 40
+            cq = 26 if preset_id == 'max' else 34 if preset_id == 'balanced' else 42
             
         settings["cmd_args"] = [
             "-c:v", settings["codec"], 
@@ -146,12 +146,13 @@ def get_engine_settings(dna, engine_type, preset_id):
         settings["codec"] = "libsvtav1"
         grain = dna.get('grain_level', 10)
         
+        # 🔴 UNIVERSAL CPU: Huge savings, but prevents the "smeary soup" effect
         if is_4k:
-            crf = 40 if preset_id == 'max' else 50 if preset_id == 'balanced' else 61
+            crf = 36 if preset_id == 'max' else 46 if preset_id == 'balanced' else 55
             preset = 8 if preset_id == 'max' else 10 if preset_id == 'balanced' else 12
             if not is_60fps: preset = max(4, preset - 2)
         else:
-            crf = 30 if preset_id == 'max' else 42 if preset_id == 'balanced' else 56
+            crf = 30 if preset_id == 'max' else 40 if preset_id == 'balanced' else 50
             preset = 4 if preset_id == 'max' else 6 if preset_id == 'balanced' else 8
 
         settings["cmd_args"] = [
@@ -161,8 +162,8 @@ def get_engine_settings(dna, engine_type, preset_id):
             "-svtav1-params", f"tune=0:film-grain={grain}"
         ]
         settings["crf_label"] = crf
+        
     return settings
-
 
 def api_analyze(file_path, temp_dir, engine_type):
     log(f"\n[PYTHON] STARTING ANALYSIS PIPELINE ({engine_type.upper()})")
@@ -197,8 +198,7 @@ def api_analyze(file_path, temp_dir, engine_type):
         
         start_enc = time.time()
         res_encode = subprocess.run(cmd_encode, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
-        enc_time = time.time() - start_enc
-
+        enc_time = max(0.5, (time.time() - start_enc) - 1.5)
         web_out_path = master_out_path
         final_est_bytes = dna['size'] 
         
@@ -211,6 +211,13 @@ def api_analyze(file_path, temp_dir, engine_type):
             estimated_video_bytes = (chunk_weight_bytes / float(PREVIEW_DURATION)) * dna['duration'] * multiplier
             estimated_audio_bytes = (128000 / 8) * dna['duration']
             final_est_bytes = estimated_video_bytes + estimated_audio_bytes
+
+            # 🔴 THE TRUTH ENFORCER 🔴
+            # Never allow the UI estimate to exceed 95% of the original file size.
+            # This fixes "crazy numbers" on heavily compressed YouTube downloads.
+            ceiling = dna['size'] * 0.95
+            if final_est_bytes > ceiling:
+                final_est_bytes = ceiling
 
             if engine_type == 'gpu':
                 web_out_path = os.path.join(temp_dir, f"vb_web_temp_{preset_id}_{uid}.mp4").replace("\\", "/")

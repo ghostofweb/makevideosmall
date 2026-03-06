@@ -6,7 +6,8 @@ import {
   UploadCloud, FileVideo, FolderArchive, XCircle, Activity, Search,
   Eye, Play, BrainCircuit, Sparkles, Info, Save, Zap,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  ListOrdered, Loader2, X
+  ListOrdered, Loader2, X,
+  Power
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -30,13 +31,6 @@ function formatBytes(bytes: number) {
   if (!+bytes) return '0 Bytes';
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(2))} ${['B', 'KB', 'MB', 'GB'][i]}`;
-}
-
-function getQuickEstimate(sizeBytes: number, preset: string) {
-  const ratios = { max: 0.80, balanced: 0.55, fast: 0.35 };
-  const estimatedSize = sizeBytes * ratios[preset as keyof typeof ratios];
-  const percentage = Math.round((1 - ratios[preset as keyof typeof ratios]) * 100);
-  return { text: `~${formatBytes(estimatedSize)}`, badge: `-${percentage}%` };
 }
 
 const containerVariants = {
@@ -65,13 +59,15 @@ interface FileListItemProps {
 function FileListItem({
   file, onRemove, onAnalyze, onPreview, onCompress, onPresetChange, renderPresetOption,
 }: FileListItemProps) {
-  const estimate = file.analysisState === 'done'
+  
+  const isAnalyzed = file.analysisState === 'done';
+  const estimate = isAnalyzed
     ? file.previewData?.videos?.previews[file.preset]?.size_formatted
-    : getQuickEstimate(file.size, file.preset).text;
+    : "Awaiting Analysis";
 
-  const savings = file.analysisState === 'done'
+  const savings = isAnalyzed
     ? '-' + file.previewData?.videos?.previews[file.preset]?.savings + '%'
-    : getQuickEstimate(file.size, file.preset).badge;
+    : null;
 
   return (
     <motion.div
@@ -91,10 +87,17 @@ function FileListItem({
             <span className="font-mono">{formatBytes(file.size)}</span>
             <Separator orientation="vertical" className="h-3 mx-1 bg-border/50" />
             <span className="capitalize font-semibold text-primary/80">{file.preset}</span>
-            <span>{estimate}</span>
-            <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 py-0 h-4 border-primary/30 text-primary">
-              {savings}
-            </Badge>
+            
+            <span className={`flex items-center gap-1 ${!isAnalyzed ? 'opacity-60 italic' : 'font-medium'}`}>
+              {!isAnalyzed && <Sparkles className="w-3 h-3" />}
+              {estimate}
+            </span>
+            
+            {savings && (
+              <Badge variant="outline" className="text-[9px] sm:text-[10px] px-1 py-0 h-4 border-primary/30 text-primary">
+                {savings}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -124,7 +127,7 @@ function FileListItem({
         <AnimatePresence mode="wait">
           {file.analysisState === 'none' && (
             <motion.div key="ai" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={(e) => { e.stopPropagation(); onAnalyze(file.id); }}><BrainCircuit className="w-3 h-3 mr-1 text-purple-400" /> Analyze</Button></TooltipTrigger><TooltipContent>Add to Analysis Queue.</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" className="h-7 px-2 text-xs border-purple-500/30 text-purple-400 hover:bg-purple-500/10" onClick={(e) => { e.stopPropagation(); onAnalyze(file.id); }}><BrainCircuit className="w-3 h-3 mr-1" /> Analyze</Button></TooltipTrigger><TooltipContent>Run AI compression estimates</TooltipContent></Tooltip>
             </motion.div>
           )}
           {file.analysisState === 'queued_for_analysis' && (
@@ -158,7 +161,9 @@ export function Home() {
   const [dragState, setDragState] = useState<DragState>('idle');
   const [currentView, setCurrentView] = useState<AppView>('workspace');
   const [appStep, setAppStep] = useState<'ingest' | 'analyzing' | 'preview'>('ingest');
-
+  
+  const [shutdownCountdown, setShutdownCountdown] = useState<number | null>(null);
+  
   const [files, setFiles] = useState<QueuedFile[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<string[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<string>('balanced');
@@ -172,6 +177,9 @@ export function Home() {
   const [tempFileName, setTempFileName] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // 🔴 NEW: The Memory Tracker for the Queue
+  const wasEncoding = useRef(false);
 
   const ingestFiles = files.filter((f) => f.queueState === 'ingest');
   const processingCount = files.filter((f) => f.queueState === 'processing').length;
@@ -225,6 +233,24 @@ export function Home() {
   }, []);
 
   useEffect(() => {
+    if (shutdownCountdown === null) return;
+    
+    if (shutdownCountdown <= 0) {
+      ipcRenderer.invoke('shutdown-pc');
+      setShutdownCountdown(null);
+      return;
+    }
+    
+    const timer = setTimeout(() => {
+      setShutdownCountdown((prev) => (prev !== null ? prev - 1 : null));
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [shutdownCountdown]);
+
+  // 🔴 THE BULLETPROOF QUEUE LOGIC
+  useEffect(() => {
+    // 1. Analysis Queue Manager
     const isAnalyzing = files.some((f) => f.analysisState === 'analyzing');
     if (!isAnalyzing) {
       const nextToAnalyze = files.find((f) => f.analysisState === 'queued_for_analysis');
@@ -233,14 +259,48 @@ export function Home() {
       }
     }
 
+    // 2. Master Encode Queue Manager
     const isEncoding = files.some((f) => f.queueState === 'processing');
+    const localQueuedCount = files.filter((f) => f.queueState === 'queued').length;
+
+    // Track if we are currently encoding
+    if (isEncoding) {
+      wasEncoding.current = true;
+    }
+
     if (!isEncoding) {
-      const nextToEncode = files.find((f) => f.queueState === 'queued');
-      if (nextToEncode) {
-        executeEncodeJob(nextToEncode);
+      if (localQueuedCount > 0) {
+        // Start the next job in line
+        const nextToEncode = files.find((f) => f.queueState === 'queued');
+        if (nextToEncode) executeEncodeJob(nextToEncode);
+      } else if (wasEncoding.current) {
+        // 🔴 Trigger: We were encoding, but now we aren't, AND the queue is empty!
+        wasEncoding.current = false; // Reset tracker
+
+        const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');
+        
+        if (settings.playSoundOnFinish && settings.customSoundPath) {
+          const audio = new Audio(`file://${settings.customSoundPath}`);
+          
+          audio.addEventListener('timeupdate', () => {
+            if (audio.currentTime >= 5) {
+              audio.pause();
+              audio.currentTime = 0;
+            }
+          });
+
+          audio.play().catch(e => console.error("Could not play sound", e));
+        }
+
+        if (settings.shutdownOnFinish) {
+          setShutdownCountdown(60); 
+          // Turn it off so it doesn't loop
+          settings.shutdownOnFinish = false;
+          localStorage.setItem('vb_settings', JSON.stringify(settings));
+        }
       }
     }
-  }, [files]); 
+  }, [files]);
 
   const cleanupPreviews = (file: QueuedFile) => {
     if (file?.previewData?.videos?.previews) {
@@ -263,7 +323,7 @@ export function Home() {
   };
 
   const executeEncodeJob = async (file: QueuedFile) => {
-    setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, queueState: 'processing', logs: ['[ENGINE] Initializing SVT-AV1 Encoder...'] } : f));
+    setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, queueState: 'processing', logs: ['[ENGINE] Initializing Encoder...'] } : f));
     const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');
     try {
       const response = await ipcRenderer.invoke('start-encode', { fileId: file.id, inputPath: file.path, preset: file.preset, customFileName: file.customName, previewsToDelete: [], settings });
@@ -278,7 +338,6 @@ export function Home() {
     }
   };
 
-  // 🔴 UX FIX: No longer auto-opens modal, just toasts and queues
   const analyzeFile = (id: string, overridePath?: string, autoNavigate = false) => {
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, analysisState: 'queued_for_analysis' } : f)));
     if (autoNavigate) setAppStep('analyzing');
@@ -379,10 +438,14 @@ export function Home() {
 
   const renderPresetOption = (file: QueuedFile, presetValue: string, label: string) => {
     const isDone = file.analysisState === 'done';
-    const sizeStr = isDone ? file.previewData?.videos?.previews[presetValue]?.size_formatted : getQuickEstimate(file.size, presetValue).text;
+    const sizeStr = isDone 
+        ? file.previewData?.videos?.previews[presetValue]?.size_formatted 
+        : "";
+
     return (
       <div className="flex justify-between items-center w-full gap-3 pr-1">
-        <span>{label}</span><span className="text-[10px] font-mono opacity-60">{isDone && <Sparkles className="w-2.5 h-2.5 inline mr-1 text-purple-400" />}{sizeStr}</span>
+        <span>{label}</span>
+        {isDone && <span className="text-[10px] font-mono opacity-60"><Sparkles className="w-2.5 h-2.5 inline mr-1 text-purple-400" />{sizeStr}</span>}
       </div>
     );
   };
@@ -391,18 +454,14 @@ export function Home() {
     <TooltipProvider delayDuration={300}>
       <main className="relative flex flex-col h-full bg-background overflow-hidden">
         
-        {/* Background Grid */}
         <div className="fixed inset-0 pointer-events-none z-0">
           <motion.div className="absolute inset-0 opacity-20" animate={{ background: [ 'radial-gradient(circle at 20% 30%, rgba(99,102,241,0.2) 0%, transparent 50%)', 'radial-gradient(circle at 80% 70%, rgba(99,102,241,0.2) 0%, transparent 50%)', 'radial-gradient(circle at 20% 30%, rgba(99,102,241,0.2) 0%, transparent 50%)'] }} transition={{ duration: 20, repeat: Infinity, ease: 'linear' }} />
           <div className="absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(rgba(99,102,241,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.1) 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
         </div>
 
-        {/* Hidden file input */}
         <input type="file" ref={fileInputRef} className="hidden" accept="video/*,.mkv,.avi,.mov,.flv,.wmv" multiple onChange={(e) => { if (e.target.files) processFiles(Array.from(e.target.files)); e.target.value = ''; }} />
 
-        {/* ---------------------------------------------------------------------- */}
-        {/* 🔴 REDESIGNED ANALYSIS QUEUE MODAL */}
-        {/* ---------------------------------------------------------------------- */}
+        {/* Analysis Queue Modal */}
         <AnimatePresence>
           {showAnalysisQueue && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -412,10 +471,7 @@ export function Home() {
                 exit={{ scale: 0.95, y: 10, opacity: 0 }} 
                 className="bg-background border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-2xl w-full max-w-lg flex flex-col relative overflow-hidden"
               >
-                {/* Decorative Top Bar */}
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-indigo-500" />
-                
-                {/* Header */}
                 <div className="flex justify-between items-center p-5 border-b border-border/50 bg-card/30 shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/20">
@@ -430,8 +486,6 @@ export function Home() {
                     <X className="w-4 h-4" />
                   </Button>
                 </div>
-
-                {/* List Content */}
                 <div className="p-5 bg-card/10">
                   <ScrollArea className="h-[280px] pr-4 -mr-4">
                     <div className="flex flex-col gap-3 pb-2">
@@ -441,22 +495,15 @@ export function Home() {
                           No videos currently in the analysis pipeline.
                         </div>
                       )}
-                      
-                      {/* Actively Analyzing Item */}
                       {activelyAnalyzing && (
                         <div className="group relative bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 flex items-center gap-3 overflow-hidden shadow-[0_0_15px_rgba(168,85,247,0.1)]">
-                          {/* Accent Line */}
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)]" />
-                          
                           <div className="relative flex items-center justify-center shrink-0 w-10 h-10 ml-1">
                              <div className="absolute inset-0 bg-purple-500/20 rounded-full blur-md animate-pulse-ring"></div>
                              <AnimatedLogo className="w-6 h-6 text-purple-400 scale-125" />
                           </div>
-                          
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-purple-50 truncate pr-2" title={activelyAnalyzing.name}>
-                              {activelyAnalyzing.name}
-                            </p>
+                            <p className="text-sm font-semibold text-purple-50 truncate pr-2" title={activelyAnalyzing.name}>{activelyAnalyzing.name}</p>
                             <p className="text-xs text-purple-400/80 flex items-center gap-1.5 mt-0.5">
                               <span className="relative flex h-2 w-2 shrink-0">
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
@@ -465,7 +512,6 @@ export function Home() {
                               Scanning DNA...
                             </p>
                           </div>
-                          
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors" onClick={() => removeFile(activelyAnalyzing.id)}>
@@ -476,20 +522,14 @@ export function Home() {
                           </Tooltip>
                         </div>
                       )}
-
-                      {/* Queued Items */}
                       {queuedForAnalysis.map((file, index) => (
                         <div key={file.id} className="bg-card/50 border border-border/50 rounded-xl p-3 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity group">
                           <div className="flex items-center justify-center shrink-0 w-8 h-8 rounded-lg bg-background border border-border/50 text-xs font-mono text-muted-foreground">
                             {index + 1}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate pr-2" title={file.name}>
-                              {file.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                              <Loader2 className="w-3 h-3 animate-spin" /> Waiting in line...
-                            </p>
+                            <p className="text-sm font-medium text-foreground truncate pr-2" title={file.name}>{file.name}</p>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Loader2 className="w-3 h-3 animate-spin" /> Waiting in line...</p>
                           </div>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -509,7 +549,7 @@ export function Home() {
           )}
         </AnimatePresence>
 
-        {/* Existing Rename Modal */}
+        {/* Rename Modal */}
         <AnimatePresence>
           {renameModal && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -644,6 +684,74 @@ export function Home() {
           {appStep === 'analyzing' && <AnalyzingView />}
           {appStep === 'preview' && selectedFile && (
             <PreviewStudio file={selectedFile} onBack={() => setAppStep('ingest')} selectedPreset={selectedPreset} setSelectedPreset={setSelectedPreset} onEncode={(preset) => requestCompression(selectedFile.id, preset, 'studio')} />
+          )}
+        </AnimatePresence>
+        
+        {/* 🔴 OVERLAY Z-INDEX 9999 TO COVER EVERYTHING */}
+        <AnimatePresence>
+          {shutdownCountdown !== null && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-card border border-border/50 shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-3xl w-full max-w-md overflow-hidden relative flex flex-col items-center p-10 text-center"
+              >
+                {/* Top accent line */}
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-rose-500" />
+                
+                {/* Subtle pulsing background glow */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-primary/10 rounded-full blur-[80px] pointer-events-none" />
+
+                <div className="relative z-10 flex items-center justify-center w-16 h-16 bg-background border border-border/50 rounded-2xl mb-6 shadow-inner">
+                  <Power className="w-8 h-8 text-primary animate-pulse" />
+                </div>
+
+                <h2 className="text-2xl font-bold text-foreground tracking-tight mb-2 relative z-10">
+                  System Shutdown
+                </h2>
+                <p className="text-sm text-muted-foreground max-w-[280px] mb-8 relative z-10 leading-relaxed">
+                  All master encodes have successfully completed. Your PC will power off shortly to save energy.
+                </p>
+
+                <div className="relative flex items-center justify-center mb-10 z-10">
+                  <svg className="transform -rotate-90 w-40 h-40">
+                    <circle cx="80" cy="80" r="74" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-white/5" />
+                    <motion.circle
+                      cx="80" cy="80" r="74"
+                      stroke="currentColor"
+                      strokeWidth="4" fill="transparent" 
+                      strokeDasharray={2 * Math.PI * 74}
+                      strokeDashoffset={2 * Math.PI * 74 * (1 - shutdownCountdown / 60)} 
+                      className="text-primary drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute flex flex-col items-center">
+                    <span className="text-5xl font-black text-foreground font-mono tabular-nums tracking-tighter">
+                      {shutdownCountdown}
+                    </span>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1">
+                      Seconds
+                    </span>
+                  </div>
+                </div>
+
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className="w-full max-w-xs h-12 text-sm font-bold border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all relative z-10"
+                  onClick={() => setShutdownCountdown(null)}
+                >
+                  Cancel Shutdown
+                </Button>
+              </motion.div>
+            </motion.div>
           )}
         </AnimatePresence>
       </main>
