@@ -181,18 +181,42 @@ ipcMain.handle('select-folder', async () => {
   });
 
   
-  ipcMain.handle('delete-physical-file', async (event, filePath) => {
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath); 
-        return { success: true };
-      }
-      return { success: false, error: "File not found." };
-    } catch (error) {
-      console.error("Failed to delete file:", error);
-      return { success: false };
+ipcMain.handle('delete-physical-file', async (event, filePath) => {
+  console.log(`\n[FILE SYSTEM] 🗑️ Deletion Request Received`);
+  console.log(`[FILE SYSTEM] Target Path: ${filePath}`);
+
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[FILE SYSTEM] ❌ Aborted: File does not exist.`);
+      return { success: false, error: "File not found on disk." };
     }
-  });
+
+    // 🔴 RE-TRY LOGIC: Sometimes the OS needs a split second to release a handle
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`[FILE SYSTEM] Attempt ${attempt}: Unlinking...`);
+        fs.unlinkSync(filePath);
+        console.log(`[FILE SYSTEM] ✅ SUCCESS: File removed.`);
+        return { success: true };
+      } catch (err: any) {
+        if (attempt === 3) throw err; // Final attempt failed
+        console.warn(`[FILE SYSTEM] ⚠️ Attempt ${attempt} failed (File likely locked). Waiting 300ms...`);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  } catch (error: any) {
+    console.error(`[FILE SYSTEM] 🛑 CRITICAL DELETE FAILURE:`, {
+      code: error.code,       
+      message: error.message,
+      path: filePath
+    });
+
+    let userError = "Delete failed. File is currently in use by the system.";
+    if (error.code === 'EPERM') userError = "Permission denied. Try running as administrator.";
+    
+    return { success: false, error: userError, rawCode: error.code };
+  }
+});
 
 
   ipcMain.handle('open-folder', async (event, folderPath) => {

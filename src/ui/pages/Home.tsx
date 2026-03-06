@@ -212,9 +212,13 @@ export function Home() {
         prev.map((f) => {
           if (f.id === data.fileId) {
             return {
-              ...f, progress: data.progress, eta: data.eta,
+              ...f, 
+              progress: data.progress, 
+              eta: data.eta,
+              path: data.type === 'complete' ? data.outputPath : f.path, 
               queueState: data.type === 'complete' ? 'completed' : 'processing',
               completedAt: data.type === 'complete' ? Date.now() : f.completedAt,
+              outputPath: data.type === 'complete' ? data.outputPath : f.outputPath
             };
           }
           return f;

@@ -65,18 +65,26 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
     await ipcRenderer.invoke('open-file-location', targetPath);
   };
 
-  const handlePhysicalDelete = async (id: string, path: string) => {
-    const confirm = window.confirm("WARNING: This will permanently delete the original video file from your hard drive. Are you sure?");
-    if (confirm) {
-      const res = await ipcRenderer.invoke('delete-physical-file', path);
-      if (res.success) {
-        toast.success("File deleted from disk.");
-        removeFile(id); 
-      } else {
-        toast.error("Failed to delete file from disk.");
-      }
+const handlePhysicalDelete = async (id: string, job: QueuedFile) => {
+  const targetPath = job.outputPath || job.path;
+  
+  if (!targetPath) {
+    toast.error("Error: Could not locate file path.");
+    return;
+  }
+
+  const confirm = window.confirm(`Permanently delete this file from disk?\n\nLocation: ${targetPath}`);
+  
+  if (confirm) {
+    const res = await ipcRenderer.invoke('delete-physical-file', targetPath);
+    if (res.success) {
+      toast.success("File deleted from disk.");
+      removeFile(id); 
+    } else {
+      toast.error(res.error || "Failed to delete file.");
     }
-  };
+  }
+};
 
   const radius = 120;
   const circumference = 2 * Math.PI * radius;
@@ -203,13 +211,13 @@ export function Queue({ activeJobs, expandedLogs, toggleLogs, removeFile, cancel
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="w-7 h-7 hover:bg-red-500/20 hover:text-red-500 text-muted-foreground transition-colors" 
-                                onClick={(e) => { e.stopPropagation(); handlePhysicalDelete(job.id, job.path); }}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
+                              variant="ghost" 
+                              size="icon" 
+                              className="..." 
+                              onClick={(e) => { e.stopPropagation(); handlePhysicalDelete(job.id, job); }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="text-[10px] font-medium text-destructive">
                               Delete Original File from Disk
