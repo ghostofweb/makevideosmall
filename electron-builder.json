@@ -2,8 +2,7 @@
   "appId": "com.ghostofweb.makevideosmall",
   "productName": "MakeVideoSmall",
   "directories": {
-    "output": "dist-installers",
-    "buildResources": "public"
+    "output": "dist-installers"
   },
   "files": [
     "dist-electron/**/*",
@@ -14,21 +13,34 @@
     {
       "from": "engine",
       "to": "engine",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*"
+      ]
     }
   ],
-  "win": {
-    "target": ["nsis"],
-    "icon": "public/logo.ico"
-  },
   "nsis": {
     "oneClick": false,
+    "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true,
-    "license": "license.txt",
     "installerIcon": "public/logo.ico",
     "uninstallerIcon": "public/logo.ico",
-    "artifactName": "${productName}_Setup_v${version}.${ext}"
+    "installerHeaderIcon": "public/logo.ico",
+    "createDesktopShortcut": "always",
+    "license": "license.txt",
+    "artifactName": "MakeVideoSmall_Setup_v${version}.${ext}",
+    "runAfterFinish": true
+  },
+  "win": {
+    "icon": "public/logo.ico",
+    "target": "nsis"
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "category": "Video",
+    "icon": "public/logo.png"
+  },
+  "mac": {
+    "target": ["dmg"],
+    "icon": "public/logo.png"
   }
 }

@@ -4,27 +4,37 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 
+// 🔴 TypeScript Fix: Explicitly define the types so TS doesn't complain about 'any'
 let activePythonProcess: import("child_process").ChildProcess | null = null;
+let activeAnalysisProcess: import("child_process").ChildProcess | null = null;
 let activeOutputPath: string | null = null;
 
+app.on('before-quit', () => {
+  console.log("[SYSTEM] App closing. Hunting down zombie processes...");
+  if (activePythonProcess && activePythonProcess.pid) {
+    if (process.platform === "win32") exec(`taskkill /pid ${activePythonProcess.pid} /t /f`);
+    else activePythonProcess.kill('SIGKILL');
+  }
+  if (activeAnalysisProcess && activeAnalysisProcess.pid) {
+    if (process.platform === "win32") exec(`taskkill /pid ${activeAnalysisProcess.pid} /t /f`);
+    else activeAnalysisProcess.kill('SIGKILL');
+  }
+});
+
 export function registerVideoAPIs() {
-  
+
   ipcMain.handle("cancel-encode", async () => {
     if (activePythonProcess && activePythonProcess.pid) {
-      console.log("[NODE BRIDGE] Terminating process tree...");
-      const pid = activePythonProcess.pid;
-
-      // Force kill process tree on Windows to ensure FFmpeg dies with Python
+      console.log("[NODE BRIDGE] Terminating Master Encode process tree...");
+      
       if (process.platform === "win32") {
-        exec(`taskkill /pid ${pid} /t /f`);
+        exec(`taskkill /pid ${activePythonProcess.pid} /t /f`);
       } else {
         activePythonProcess.kill('SIGKILL');
       }
 
-      // Clean up the half-finished video file
       if (activeOutputPath) {
         const fileToDelete = activeOutputPath;
-        
         setTimeout(() => {
           if (fs.existsSync(fileToDelete)) {
             try {
@@ -41,27 +51,45 @@ export function registerVideoAPIs() {
       activeOutputPath = null;
       return { success: true };
     }
-    return { success: false, error: "No active process" };
+    return { success: false, error: "No active encode process" };
+  });
+
+  ipcMain.handle("cancel-analysis", async () => {
+    if (activeAnalysisProcess && activeAnalysisProcess.pid) {
+      console.log("[NODE BRIDGE] Terminating Analysis process tree...");
+      if (process.platform === "win32") {
+        exec(`taskkill /pid ${activeAnalysisProcess.pid} /t /f`);
+      } else {
+        activeAnalysisProcess.kill('SIGKILL');
+      }
+      activeAnalysisProcess = null;
+      return { success: true };
+    }
+    return { success: false, error: "No active analysis process" };
   });
 
   ipcMain.handle("analyze-video", async (event, { filePath, settings }) => {
     return new Promise((resolve) => {
-      const engineDir = path.join(app.getAppPath(), "engine");
+      const engineDir = app.isPackaged 
+        ? path.join(process.resourcesPath, "engine") 
+        : path.join(app.getAppPath(), "engine");
+
+      const engineChoice = settings?.engine || 'gpu';
       const pythonScript = path.join(engineDir, "compress.py");
 
-      // Safely create OS temp directory for the previews
       const safeTempDir = path.join(os.tmpdir(), "videobake_temp");
       if (!fs.existsSync(safeTempDir)) {
         fs.mkdirSync(safeTempDir, { recursive: true });
       }
 
       console.log(`\n=================================================`);
-      console.log(`[NODE BRIDGE] Launching AI Analysis`);
+      console.log(`[NODE BRIDGE] 🧬 LAUNCHING AI ANALYSIS`);
       console.log(`[NODE BRIDGE] Target File: "${filePath}"`);
-      console.log(`[NODE BRIDGE] Safe Temp Dir: "${safeTempDir}"`);
+      console.log(`[NODE BRIDGE] Requested Engine: ${engineChoice.toUpperCase()}`);
       console.log(`=================================================\n`);
 
       if (!filePath) {
+        console.error("[NODE BRIDGE] Failed: File path is empty.");
         resolve({ success: false, error: "File path is empty." });
         return;
       }
@@ -70,49 +98,70 @@ export function registerVideoAPIs() {
         ...process.env, 
         PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
       };
-
-      const totalThreads = os.cpus().length;
-      const freeThreads = settings?.freeCpuCores ?? 2; 
-      const threadsToUse = Math.max(1, totalThreads - freeThreads).toString();
-
-      const pythonProcess = spawn("python", [
-        pythonScript,
-        "--action", "analyze",
+      
+      const pythonArgs = [
+        pythonScript, 
+        "--action", "analyze", 
         "--input", filePath,
-        "--tempdir", safeTempDir,
-        "--threads", threadsToUse 
-      ], { env });
+        "--tempdir", safeTempDir, 
+        "--impact", "stealth", 
+        "--engine", engineChoice
+      ];
+
+      console.log(`[NODE BRIDGE] Executing command: python ${pythonArgs.join(" ")}`);
+      
+      const pythonProcess = spawn("python", pythonArgs, { env });
+      activeAnalysisProcess = pythonProcess;
 
       let jsonOutput = "";
       let errorLog = "";
 
       pythonProcess.on("error", (err) => {
-        console.error("[PYTHON SPAWN ERROR]", err);
+        console.error("[NODE BRIDGE] [PYTHON SPAWN ERROR]", err);
       });
       
       pythonProcess.stdout.on("data", (data) => {
-         jsonOutput += data.toString();
+        const str = data.toString();
+        try {
+           const parsed = JSON.parse(str.trim());
+           if (parsed.type === 'analysis_progress') {
+             // We don't log every progress tick here to avoid spamming the console, 
+             // but we send it to the UI.
+             event.sender.send('analyze-telemetry', parsed);
+             return;
+           }
+        } catch(e) {
+           // Not a progress JSON, append to our final output buffer
+        }
+        jsonOutput += str;
       });
       
       pythonProcess.stderr.on("data", (data) => {
          const str = data.toString();
+         console.log(`[PYTHON ANALYZE LOG] ${str.trim()}`);
          errorLog += str;
-         console.error(`[PYTHON STDERR]: ${str.trim()}`);
       });
 
       pythonProcess.on("close", (code) => {
-        console.log(`\n[NODE BRIDGE] Python process closed with code: ${code}`);
+        console.log(`[NODE BRIDGE] Analysis process closed with code: ${code}`);
+        activeAnalysisProcess = null;
+
         if (code !== 0) {
-          console.error(`[NODE BRIDGE] ERROR LOG DUMP:\n${errorLog}`);
-          resolve({ success: false, error: errorLog.trim() || `Python crashed` });
+          console.error(`[NODE BRIDGE] Analysis Failed. Error Log:\n${errorLog}`);
+          resolve({ success: false, error: errorLog.trim() || `Process crashed or was killed` });
           return;
         }
 
         try {
-          const result = JSON.parse(jsonOutput.trim());
-          console.log("[NODE BRIDGE] Analysis complete. JSON parsed successfully.");
+          // Extract just the final JSON payload in case other text got mixed in
+          const lines = jsonOutput.trim().split('\n');
+          const finalLine = lines[lines.length - 1];
+          const result = JSON.parse(finalLine);
+          
+          console.log(`[NODE BRIDGE] Analysis complete. Detected Engine: ${result.active_engine?.toUpperCase()}`);
           resolve({ success: true, data: result });
         } catch (e) {
+          console.error(`[NODE BRIDGE] Failed to parse Python JSON output. Output was:`, jsonOutput);
           resolve({ success: false, error: "Failed to parse Python data." });
         }
       });
@@ -127,35 +176,45 @@ export function registerVideoAPIs() {
       ? customFileName.replace(/\.[^/.]+$/, "") 
       : `${parsedPath.name}_AV1`;
 
-
     let outputPath = path.join(parsedPath.dir, `${finalBaseName}${parsedPath.ext}`);
     if (settings?.outputRouting === 'custom' && settings?.customOutputPath) {
       outputPath = path.join(settings.customOutputPath, `${finalBaseName}${parsedPath.ext}`);
     }
 
-    const engineDir = path.join(app.getAppPath(), "engine");
+    const engineChoice = settings?.engine || 'gpu';
+    const impactLevel = settings?.systemImpact || 'balanced';
+
+    const engineDir = app.isPackaged 
+      ? path.join(process.resourcesPath, "engine") 
+      : path.join(app.getAppPath(), "engine"); 
+      
     const pythonScript = path.join(engineDir, "compress.py");
 
+    // Clean up temporary preview files
     if (previewsToDelete && Array.isArray(previewsToDelete)) {
+      console.log(`[NODE BRIDGE] Cleaning up ${previewsToDelete.length} temporary preview files...`);
       previewsToDelete.forEach(tempFile => {
         if (tempFile && fs.existsSync(tempFile)) {
           try {
             fs.unlinkSync(tempFile);
-            console.log(`[NODE BRIDGE] Cleaned up temp file: ${tempFile}`);
           } catch (err) {
-            console.error(`[NODE BRIDGE] Failed to clean up temp file: ${tempFile}`);
+            console.warn(`[NODE BRIDGE] Failed to delete temp file: ${tempFile}`);
           }
         }
       });
     }
 
     console.log(`\n=================================================`);
-    console.log(`[NODE BRIDGE] Launching Master Encode`);
+    console.log(`[NODE BRIDGE] 🚀 LAUNCHING MASTER ENCODE`);
     console.log(`[NODE BRIDGE] Input: "${inputPath}"`);
     console.log(`[NODE BRIDGE] Output: "${outputPath}"`);
+    console.log(`[NODE BRIDGE] Target Engine: ${engineChoice.toUpperCase()}`);
+    console.log(`[NODE BRIDGE] OS Impact Level: ${impactLevel.toUpperCase()}`);
+    console.log(`[NODE BRIDGE] Preset: ${preset.toUpperCase()}`);
     console.log(`=================================================\n`);
 
     if (!inputPath) {
+      console.error("[NODE BRIDGE] Encode Failed: Input path is empty.");
       return { success: false, error: "Input path is empty." };
     }
 
@@ -164,19 +223,19 @@ export function registerVideoAPIs() {
       PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
     };
 
-    // 🔴 THE FIX: Redefined totalThreads here so it's available in this scope!
-    const totalThreads = os.cpus().length;
-    const freeThreads = settings?.freeCpuCores ?? 2; 
-    const threadsToUse = Math.max(1, totalThreads - freeThreads).toString();
-
-    const pythonProcess = spawn("python", [
+    const pythonArgs = [
       pythonScript,
       "--action", "encode",
       "--input", inputPath,
       "--preset", preset,
       "--output", outputPath,
-      "--threads", threadsToUse 
-    ], { env });
+      "--impact", impactLevel,
+      "--engine", engineChoice
+    ];
+
+    console.log(`[NODE BRIDGE] Executing command: python ${pythonArgs.join(" ")}`);
+
+    const pythonProcess = spawn("python", pythonArgs, { env });
 
     activePythonProcess = pythonProcess;
     activeOutputPath = outputPath;
@@ -189,7 +248,8 @@ export function registerVideoAPIs() {
           const parsed = JSON.parse(line.trim());
           event.sender.send('encode-telemetry', { fileId, ...parsed });
         } catch (e) {
-          console.log(`[PYTHON STDOUT]: ${line}`);
+          // If it's not JSON, it might just be standard output we want to see in the console
+          console.log(`[PYTHON STDOUT] ${line.trim()}`);
         }
       }
     });
@@ -198,34 +258,48 @@ export function registerVideoAPIs() {
       const str = data.toString().trim();
       if (!str) return;
       
-      console.log(str); 
-      event.sender.send('encode-log', { fileId, log: str });
+      // We log the raw FFmpeg/Python stderr output to the Node console for debugging
+      console.log(`[PYTHON STDERR] ${str}`);
+      
+      // 🔴 TRUTH TELLER: Intercept Python's hardware warning and send to UI
+      if (str.includes("[PYTHON WARN] Hardware probe failed") || str.includes("Fallback to CPU")) {
+         console.warn("[NODE BRIDGE] Intercepted GPU Fallback Warning. Sending to UI.");
+         event.sender.send('encode-log', { 
+           fileId, 
+           log: "[SYSTEM WARN] GPU Not Detected. Forcing Deep CPU Mode. ETA will increase significantly." 
+         });
+      } else {
+         // Send standard logs to the UI's log console
+         event.sender.send('encode-log', { fileId, log: str });
+      }
     });
 
     return new Promise((resolve) => {
       pythonProcess.on("close", (code) => {
-        console.log(`\n[NODE BRIDGE] Encode finished with code: ${code}`);
+        console.log(`\n[NODE BRIDGE] Encode finished with exit code: ${code}`);
         
         activePythonProcess = null;
         activeOutputPath = null;
 
         if (code === 0) {
-          // AUTOMATION: Delete the original video if they checked the box
+          console.log(`[NODE BRIDGE] Encode SUCCESS! File ready at: ${outputPath}`);
+          
           if (settings?.deleteOriginal) {
+            console.log(`[NODE BRIDGE] Auto-Delete enabled. Removing original file: ${inputPath}`);
             try {
               if (fs.existsSync(inputPath)) {
                 fs.unlinkSync(inputPath);
-                console.log(`[NODE BRIDGE] AUTOMATION: Deleted original file -> ${inputPath}`);
               }
             } catch (err) {
-              console.error("[NODE BRIDGE] Failed to delete original file.", err);
+              console.error(`[NODE BRIDGE] Failed to delete original file:`, err);
             }
           }
+        } else {
+          console.error(`[NODE BRIDGE] Encode FAILED.`);
         }
-
+        
         resolve({ success: code === 0, outputPath });
       });
     });
   });
-
 }

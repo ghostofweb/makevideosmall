@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net, nativeTheme } from "electron";
+import { app, BrowserWindow, protocol, net, nativeTheme, ipcMain } from "electron";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { isDev } from "./util.js";
@@ -22,8 +22,6 @@ app.on("ready", () => {
   });
 
   registerAllIPCs();
-
-  const projectRoot = app.getAppPath();
 
   const getIconPath = () => {
     const isDark = nativeTheme.shouldUseDarkColors;
@@ -68,7 +66,27 @@ app.on("ready", () => {
     mainWindow.show();
     mainWindow.focus();
   });
-  
+
+  mainWindow.webContents.on('devtools-opened', () => {
+  if (app.isPackaged) {
+    mainWindow.webContents.closeDevTools();
+  }
+});
+
+mainWindow.webContents.on('before-input-event', (event, input) => {
+  if (app.isPackaged && input.control && input.shift && input.key.toLowerCase() === 'i') {
+    event.preventDefault();
+  }
+});
+
+ipcMain.handle('toggle-dev-tools', (event, show) => {
+  if (show) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    mainWindow.webContents.closeDevTools();
+  }
+});
+
 if (isDev()) {
     mainWindow.loadURL("http://localhost:5123/");
   } else {

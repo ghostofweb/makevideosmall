@@ -1,21 +1,34 @@
+// @ts-nocheck
 import { Settings, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from 'next-themes';
-import logo from '../../../../public/logo-white.svg'
+
+// Import both versions of the logo
+import logoWhite from '../../../../public/logo-white.png';
+import logoDark from '../../../../public/logo.png';
+
 interface HeaderProps {
   onOpenSettings: () => void;
 }
 
 export function Header({ onOpenSettings }: HeaderProps) {
-  const { theme, setTheme } = useTheme();
+  // Use resolvedTheme to correctly handle 'system' mode detection
+  const { theme, setTheme, resolvedTheme } = useTheme();
+
+  // Determine which logo to display based on the active theme
+  const activeLogo = resolvedTheme === 'dark' ? logoWhite : logoDark;
 
   return (
     <header
       className="flex justify-between items-center px-6 pb-3 pt-10 bg-background/80 backdrop-blur-md border-b border-border select-none z-30"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      style={{ WebkitAppRegion: 'drag' } as any}
     >
       <div className="flex items-center gap-2">
-        <img src={logo} className="w-12 h-12" />
+        <img 
+          src={activeLogo} 
+          alt="Make Video Small Logo" 
+          className="w-10 h-10 object-contain transition-opacity duration-300" 
+        />
         <h1 className="text-sm font-semibold tracking-wide text-foreground/90">Make Video Small</h1>
       </div>
 
