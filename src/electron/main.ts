@@ -80,7 +80,19 @@ app.on("ready", () => {
   }
 });
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  });
+
+  mainWindow.webContents.on('zoom-changed', (event, zoomDirection) => {
+    event.preventDefault();
+  });
+
 mainWindow.webContents.on('before-input-event', (event, input) => {
+  if (input.control && (input.key === '-' || input.key === '=' || input.key === '+')) {
+    event.preventDefault();
+  }
+
   if (app.isPackaged && input.control && input.shift && input.key.toLowerCase() === 'i') {
     event.preventDefault();
   }

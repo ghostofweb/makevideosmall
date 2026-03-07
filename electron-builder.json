@@ -1,46 +1,53 @@
 {
-  "appId": "com.ghostofweb.makevideosmall",
-  "productName": "MakeVideoSmall",
-  "directories": {
-    "output": "dist-installers"
+  "name": "make-video-small",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "description": "Professional AV1 Video Compression Studio",
+  "author": "Sahiljeet Singh Kalsi (GhostofWeb)",
+  "main": "dist-electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghostofweb/makevideosmall.git"
   },
-  "files": [
-    "dist-electron/**/*",
-    "dist-react/**/*",
-    "package.json"
-  ],
-  "extraResources": [
-    {
-      "from": "engine",
-      "to": "engine",
-      "filter": [
-        "**/*"
-      ]
-    }
-  ],
-  "nsis": {
-    "oneClick": false,
-    "perMachine": false,
-    "allowToChangeInstallationDirectory": true,
-    "installerIcon": "public/logo.ico",
-    "uninstallerIcon": "public/logo.ico",
-    "installerHeaderIcon": "public/logo.ico",
-    "createDesktopShortcut": "always",
-    "license": "license.txt",
-    "artifactName": "MakeVideoSmall_Setup_v${version}.${ext}",
-    "runAfterFinish": true
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:react dev:electron",
+    "dev:react": "vite",
+    "dev:electron": "npm run transpile:electron && electron .",
+    "build": "npm run transpile:electron && tsc -b && vite build",
+    "transpile:electron": "tsc --project src/electron/tsconfig.json",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish always"
   },
-  "win": {
-    "icon": "public/logo.ico",
-    "target": "nsis"
+  "build": {
+    "appId": "com.ghostofweb.makevideosmall",
+    "productName": "Make Video Small",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ghostofweb",
+        "repo": "makevideosmall"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist-react/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "engine/**/*"
+    ],
+    "asar": true
   },
-  "linux": {
-    "target": ["AppImage", "deb"],
-    "category": "Video",
-    "icon": "public/logo.png"
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   },
-  "mac": {
-    "target": ["dmg"],
-    "icon": "public/logo.png"
+  "devDependencies": {
+    "electron-builder": "^26.8.1",
+    "..." : "..."
   }
 }
