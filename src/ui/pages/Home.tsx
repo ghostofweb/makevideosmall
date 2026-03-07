@@ -178,7 +178,6 @@ export function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // 🔴 NEW: The Memory Tracker for the Queue
   const wasEncoding = useRef(false);
 
   const ingestFiles = files.filter((f) => f.queueState === 'ingest');
@@ -252,7 +251,6 @@ export function Home() {
     return () => clearTimeout(timer);
   }, [shutdownCountdown]);
 
-  // 🔴 THE BULLETPROOF QUEUE LOGIC
   useEffect(() => {
     // 1. Analysis Queue Manager
     const isAnalyzing = files.some((f) => f.analysisState === 'analyzing');
@@ -278,7 +276,6 @@ export function Home() {
         const nextToEncode = files.find((f) => f.queueState === 'queued');
         if (nextToEncode) executeEncodeJob(nextToEncode);
       } else if (wasEncoding.current) {
-        // 🔴 Trigger: We were encoding, but now we aren't, AND the queue is empty!
         wasEncoding.current = false; // Reset tracker
 
         const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');

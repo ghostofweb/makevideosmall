@@ -4,7 +4,6 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 
-// 🔴 TypeScript Fix: Explicitly define the types so TS doesn't complain about 'any'
 let activePythonProcess: import("child_process").ChildProcess | null = null;
 let activeAnalysisProcess: import("child_process").ChildProcess | null = null;
 let activeOutputPath: string | null = null;
@@ -261,7 +260,6 @@ export function registerVideoAPIs() {
       // We log the raw FFmpeg/Python stderr output to the Node console for debugging
       console.log(`[PYTHON STDERR] ${str}`);
       
-      // 🔴 TRUTH TELLER: Intercept Python's hardware warning and send to UI
       if (str.includes("[PYTHON WARN] Hardware probe failed") || str.includes("Fallback to CPU")) {
          console.warn("[NODE BRIDGE] Intercepted GPU Fallback Warning. Sending to UI.");
          event.sender.send('encode-log', { 

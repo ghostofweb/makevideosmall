@@ -16,7 +16,7 @@ export interface QueuedFile {
   eta: string;
   logs: string[];
     completedAt?: number;
-    previewData?: any;      // Holds the AI JSON from Python
+    previewData?: any;   
   outputPath?: string;
   customName?: string;
 }

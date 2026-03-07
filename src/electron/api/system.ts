@@ -191,7 +191,6 @@ ipcMain.handle('delete-physical-file', async (event, filePath) => {
       return { success: false, error: "File not found on disk." };
     }
 
-    // 🔴 RE-TRY LOGIC: Sometimes the OS needs a split second to release a handle
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(`[FILE SYSTEM] Attempt ${attempt}: Unlinking...`);

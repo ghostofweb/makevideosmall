@@ -127,7 +127,6 @@ def get_engine_settings(dna, engine_type, preset_id):
     if engine_type == 'gpu':
         settings["codec"] = "hevc_nvenc"
         
-        # 🔴 UNIVERSAL GPU: Heavy, but respects high-motion video
         if is_4k:
             cq = 32 if preset_id == 'max' else 40 if preset_id == 'balanced' else 48
         else:
@@ -146,7 +145,6 @@ def get_engine_settings(dna, engine_type, preset_id):
         settings["codec"] = "libsvtav1"
         grain = dna.get('grain_level', 10)
         
-        # 🔴 UNIVERSAL CPU: Huge savings, but prevents the "smeary soup" effect
         if is_4k:
             crf = 36 if preset_id == 'max' else 46 if preset_id == 'balanced' else 55
             preset = 8 if preset_id == 'max' else 10 if preset_id == 'balanced' else 12
@@ -205,16 +203,12 @@ def api_analyze(file_path, temp_dir, engine_type):
         if os.path.exists(master_out_path):
             chunk_weight_bytes = os.path.getsize(master_out_path)
             
-            # ESTIMATION PADDING: Offsets the discrepancy of measuring a single static 3-second scene.
             multiplier = 1.25 if engine_type == 'gpu' else 1.10
             
             estimated_video_bytes = (chunk_weight_bytes / float(PREVIEW_DURATION)) * dna['duration'] * multiplier
             estimated_audio_bytes = (128000 / 8) * dna['duration']
             final_est_bytes = estimated_video_bytes + estimated_audio_bytes
 
-            # 🔴 THE TRUTH ENFORCER 🔴
-            # Never allow the UI estimate to exceed 95% of the original file size.
-            # This fixes "crazy numbers" on heavily compressed YouTube downloads.
             ceiling = dna['size'] * 0.95
             if final_est_bytes > ceiling:
                 final_est_bytes = ceiling

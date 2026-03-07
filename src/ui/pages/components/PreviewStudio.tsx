@@ -28,7 +28,6 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
   const payload = file?.previewData;
   const settings = JSON.parse(localStorage.getItem('vb_settings') || '{}');
 
-  // 🔴 Sync playback between original and compressed preview
   useEffect(() => {
     if (videosLoaded.orig && videosLoaded.comp) {
       const orig = videoRefOriginal.current;
@@ -93,8 +92,7 @@ export function PreviewStudio({ file, onBack, selectedPreset, setSelectedPreset,
   const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
   const itemVariants = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } } };
 
-  // 🔴 Source Diagnostic Engine
- const getSourceDiagnosis = (bpp: number) => {
+  const getSourceDiagnosis = (bpp: number) => {
     if (bpp >= 0.1) return { badge: "Pristine", colors: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10", desc: "High data density (Raw/Original). Expect massive file size reduction." };
     if (bpp >= 0.03) return { badge: "Standard", colors: "text-blue-400 border-blue-400/30 bg-blue-400/10", desc: "Average data density. Good candidate for standard compression." };
     return { badge: "Pre-Compressed", colors: "text-amber-400 border-amber-400/30 bg-amber-400/10", desc: "File is already heavily compressed (e.g., Web/YouTube download). The engine has engaged safety limits to prevent bloating." };
