@@ -1,15 +1,21 @@
-END USER LICENSE AGREEMENT FOR MakeVideoSmall STUDIO
+MIT License
 
-1. ACCEPTANCE OF TERMS
-By installing and using MakeVideoSmall Studio, you agree to make your videos incredibly small without sacrificing visual quality. 
+Copyright (c) 2026 Sahiljeet Singh Kalsi (GhostofWeb)
 
-2. HARDWARE USAGE
-You acknowledge that video encoding is an intensive process. MakeVideoSmall Studio will utilize your CPU and GPU to bake these videos to perfection, but will strictly obey the Hardware Guardrails you set within the application to prevent system freezes.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-3. AUTOMATION & FILE DELETION
-If you enable "Delete original" in the automation settings, the software will permanently delete your original source files from your hard drive after a successful encode. You accept full responsibility for enabling this feature.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-4. LIABILITY
-We are not responsible for how much free hard drive space you suddenly have after compressing your entire media library.
-
-Click "I Agree" to continue the installation and start baking!
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
