@@ -3,6 +3,8 @@ import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { isDev } from "./util.js";
 import { registerAllIPCs } from "./api/index.js";
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +22,12 @@ app.on("ready", () => {
     filePath = decodeURIComponent(filePath);
     return net.fetch(pathToFileURL(filePath).href);
   });
-
+  if (!isDev()) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
+  autoUpdater.on('checking-for-update', () => console.log('[UPDATER] Checking for updates...'));
+  autoUpdater.on('update-available', () => console.log('[UPDATER] Update available!'));
+  autoUpdater.on('update-not-available', () => console.log('[UPDATER] App is up to date.'));
   registerAllIPCs();
 
   const getIconPath = () => {

@@ -1,50 +1,38 @@
 {
-  "name": "electron",
-  "version": "0.0.0",
-  "private": true,
+  "name": "make-video-small",
+  "version": "1.0.0",
+  "private": false,
   "type": "module",
-  "description": "Template desktop app built with Electron + React + TypeScript",
-  "author": "GhostofWeb",
+  "description": "Professional AV1 Video Compression Studio",
+  "author": "Sahiljeet Singh Kalsi (GhostofWeb)",
   "main": "dist-electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghostofweb/makevideosmall.git" 
+  },
   "scripts": {
     "dev": "npm-run-all --parallel dev:react dev:electron",
     "dev:react": "vite",
     "dev:electron": "npm run transpile:electron && electron .",
     "build": "npm run transpile:electron && tsc -b && vite build",
     "transpile:electron": "tsc --project src/electron/tsconfig.json",
-    "dist:win": "npm run build && electron-builder --win --x64"
+    "dist:win": "npm run build && electron-builder --win --x64 --publish always"
   },
-  "dependencies": {
-    "@tailwindcss/vite": "^4.2.1",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.34.3",
-    "lucide-react": "^0.575.0",
-    "next-themes": "^0.4.6",
-    "radix-ui": "^1.4.3",
-    "react": "^19.1.1",
-    "react-compare-slider": "^3.1.0",
-    "react-dom": "^19.1.1",
-    "recharts": "^3.7.0",
-    "sonner": "^2.0.7",
-    "systeminformation": "^5.31.1",
-    "tailwind-merge": "^3.5.0",
-    "tailwindcss": "^4.2.1",
-    "xterm": "^5.3.0"
-  },
-  "devDependencies": {
-    "@types/fs-extra": "^11.0.4",
-    "@types/node": "^25.3.0",
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
-    "@vitejs/plugin-react": "^5.0.2",
-    "cross-env": "^10.0.0",
-    "electron": "^38.0.0",
-    "electron-builder": "^26.8.1",
-    "npm-run-all": "^4.1.5",
-    "shadcn": "^3.8.5",
-    "tw-animate-css": "^1.4.0",
-    "typescript": "~5.8.3",
-    "vite": "^7.1.2"
+  "build": {
+    "appId": "com.ghostofweb.makevideosmall",
+    "productName": "Make Video Small",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ghostofweb", 
+        "repo": "makevideosmall" 
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
   }
 }
