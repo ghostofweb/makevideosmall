@@ -1,164 +1,47 @@
-# Electron + React (Vite + TypeScript) Starter Template 🚀
+# Make Video Small
 
-A step-by-step guide for setting up a desktop application with Electron and React (Vite + TypeScript).
+A professional desktop application designed for high-efficiency AV1 video compression. 
 
----
+Make Video Small provides a sleek, modern interface for advanced video encoding, bridging the gap between complex command-line tools like FFmpeg/Av1an and an intuitive user experience. It allows content creators, developers, and professionals to significantly reduce video file sizes while maintaining near-lossless visual quality.
 
-## Step 1: Initialize React Project with Vite
+![Make Video Small Interface](./screenshot.png)
 
-```bash
-npm create vite@latest .
-npm install
-```
+## Core Features
 
-- **Framework:** react
-- **Variant:** typescript
+* **Next-Generation AV1 Encoding:** Utilizes the AV1 codec to achieve up to 90% reduction in file size compared to standard H.264 formats.
+* **Hardware Acceleration:** Native support for GPU-accelerated encoding (NVIDIA NVENC, AMD AMF) for rapid processing times.
+* **Intelligent Analysis:** Built-in hardware and media analysis to automatically recommend the optimal encoding parameters for a given file.
+* **Local & Private:** 100% offline processing. No video files are ever uploaded to a server, ensuring complete data privacy.
+* **Batch Processing:** Queue multiple videos for sequential compression without manual intervention.
+* **Seamless Updates:** Integrated auto-updater ensures you always have the latest engine improvements and bug fixes.
 
-> Sets up a modern React project with TypeScript.
+## Technology Stack
 
----
+This application is built using a modern, decoupled architecture:
 
-## Step 2: Organize Project Structure
+* **Frontend:** React 19, Tailwind CSS, and Radix UI components for a highly responsive, dark-mode native interface.
+* **Desktop Wrapper:** Electron (v38) providing a secure, sandboxed environment with strict IPC (Inter-Process Communication) bridging.
+* **Compression Engine:** A custom Python backend managing FFmpeg and Av1an processes.
+* **Build System:** Vite for fast frontend compilation, TypeScript for type safety, and `electron-builder` for generating professional NSIS Windows installers.
 
-1. Inside `src`, create a folder: `UI`
-2. Move all existing files/folders from `src` → `src/UI`
-3. Update `index.html` script path:
+## Installation (End Users)
 
-```html
-<script type="module" src="/src/UI/main.tsx"></script>
-```
+To use Make Video Small, you do not need to build it from source.
 
-4. Delete `public/` folder (not needed for desktop app)
+1. Navigate to the [Releases page](https://github.com/ghostofweb/makevideosmall/releases).
+2. Download the latest `MakeVideoSmall_Setup_vX.X.X.exe`.
+3. Run the installer and follow the standard setup wizard.
 
-> Keeps React UI separate from Electron code.
+## Local Development
 
----
+If you wish to contribute or modify the application, follow these steps to set up your local environment.
 
-## Step 3: Configure Vite Build Output
+### Prerequisites
+* [Node.js](https://nodejs.org/) (v18 or higher recommended)
+* Git
 
-`vite.config.ts`:
-
-```ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  build: { outDir: 'dist-react' },
-})
-```
-
-Test build:
-
-```bash
-npm run build
-```
-
-- Add `dist-react` to `.gitignore`
-
----
-
-## Step 4: Install & Setup Electron
-
-```bash
-npm install --save-dev electron
-```
-
-- Ensure `package.json` has `"type": "module"`
-
----
-
-## Step 5: Create Electron Main Process
-
-- Folder: `src/electron`
-- File: `main.js` (later convert to `main.ts`)
-- Add basic Electron code to create a window and load React build from `dist-react`
-
----
-
-## Step 6: Configure `package.json` Scripts
-
-```json
-"main": "dist-electron/main.js",
-"scripts": {
-  "dev:electron": "cross-env NODE_ENV=development electron ."
-}
-```
-
----
-
-## Step 7: Convert Electron Main Process to TypeScript
-
-1. Create `src/electron/tsconfig.json`:
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ES2022",
-    "outDir": "../../dist-electron"
-  }
-}
-```
-
-2. Rename `main.js` → `main.ts`
-3. Add transpile script:
-
-```json
-"scripts": {
-  "transpile:electron": "tsc --project src/electron/tsconfig.json"
-}
-```
-
-- Add `dist-electron` to `.gitignore`
-
----
-
-## Step 8: Set Up Electron Builder
-
-```bash
-npm install --save-dev electron-builder
-```
-
-- Config file: `electron-builder.json`
-- Build script:
-
-```json
-"scripts": {
-  "dist:win": "npm run transpile:electron && npm run build && electron-builder"
-}
-```
-
-> Packages your app into executable files (.exe, .dmg)
-
----
-
-## Step 9: Improve Developer Experience (DX)
-
-```bash
-npm install --save-dev cross-env npm-run-all
-```
-
-- Fixed Vite port (e.g., 5123)
-- Load `http://localhost:5123` in dev, `dist-react/index.html` in production
-
-Combined dev script:
-
-```json
-"scripts": {
-  "dev:react": "vite",
-  "dev:electron": "cross-env NODE_ENV=development electron .",
-  "dev": "npm-run-all --parallel dev:react dev:electron"
-}
-```
-
-Run development environment:
-
-```bash
-npm run dev
-```
-
----
-
-✅ Done! Your **Electron + React + TypeScript setup** is ready for development and packaging.
-
+### Setup
+1. Clone the repository:
+   ```bash
+   git clone [https://github.com/ghostofweb/makevideosmall.git](https://github.com/ghostofweb/makevideosmall.git)
+   cd makevideosmall
