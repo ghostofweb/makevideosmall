@@ -23,5 +23,7 @@ dist-installers
 *.njsproj
 *.sln
 *.sw?
-engine/*.exe
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
 engine/*.pth

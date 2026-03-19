@@ -74,7 +74,7 @@ export function registerVideoAPIs() {
         : path.join(app.getAppPath(), "engine");
 
       const engineChoice = settings?.engine || 'gpu';
-      const pythonScript = path.join(engineDir, "compress.py");
+      const engineExecutable = path.join(engineDir, "compress.exe");
 
       const safeTempDir = path.join(os.tmpdir(), "videobake_temp");
       if (!fs.existsSync(safeTempDir)) {
@@ -98,8 +98,7 @@ export function registerVideoAPIs() {
         PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
       };
       
-      const pythonArgs = [
-        pythonScript, 
+      const engineArgs = [
         "--action", "analyze", 
         "--input", filePath,
         "--tempdir", safeTempDir, 
@@ -107,9 +106,8 @@ export function registerVideoAPIs() {
         "--engine", engineChoice
       ];
 
-      console.log(`[NODE BRIDGE] Executing command: python ${pythonArgs.join(" ")}`);
-      
-      const pythonProcess = spawn("python", pythonArgs, { env });
+     console.log(`[NODE BRIDGE] Executing command: compress.exe ${engineArgs.join(" ")}`); 
+      const pythonProcess = spawn(engineExecutable, engineArgs, { env });
       activeAnalysisProcess = pythonProcess;
 
       let jsonOutput = "";
@@ -146,8 +144,12 @@ export function registerVideoAPIs() {
         activeAnalysisProcess = null;
 
         if (code !== 0) {
-          console.error(`[NODE BRIDGE] Analysis Failed. Error Log:\n${errorLog}`);
-          resolve({ success: false, error: errorLog.trim() || `Process crashed or was killed` });
+          console.error(`[NODE BRIDGE] Analysis Failed. Error Log (stderr):\n${errorLog}`);
+          console.error(`[NODE BRIDGE] Hidden Python Output (stdout):\n${jsonOutput}`); // <-- NEW
+          
+          // Combine both logs so the UI shows whatever Python said
+          const finalError = errorLog.trim() || jsonOutput.trim() || `Process crashed silently.`;
+          resolve({ success: false, error: finalError });
           return;
         }
 
@@ -185,10 +187,9 @@ export function registerVideoAPIs() {
 
     const engineDir = app.isPackaged 
       ? path.join(process.resourcesPath, "engine") 
-      : path.join(app.getAppPath(), "engine"); 
+      : path.join(app.getAppPath(), "engine");
       
-    const pythonScript = path.join(engineDir, "compress.py");
-
+  const engineExecutable = path.join(engineDir, "compress.exe");
     // Clean up temporary preview files
     if (previewsToDelete && Array.isArray(previewsToDelete)) {
       console.log(`[NODE BRIDGE] Cleaning up ${previewsToDelete.length} temporary preview files...`);
@@ -222,8 +223,7 @@ export function registerVideoAPIs() {
       PATH: `${engineDir}${path.delimiter}${process.env.PATH}` 
     };
 
-    const pythonArgs = [
-      pythonScript,
+    const engineArgs = [
       "--action", "encode",
       "--input", inputPath,
       "--preset", preset,
@@ -232,9 +232,10 @@ export function registerVideoAPIs() {
       "--engine", engineChoice
     ];
 
-    console.log(`[NODE BRIDGE] Executing command: python ${pythonArgs.join(" ")}`);
+    console.log(`[NODE BRIDGE] Executing command: compress.exe ${engineArgs.join(" ")}`);
 
-    const pythonProcess = spawn("python", pythonArgs, { env });
+    // 3. Spawn the executable directly
+    const pythonProcess = spawn(engineExecutable, engineArgs, { env });
 
     activePythonProcess = pythonProcess;
     activeOutputPath = outputPath;
