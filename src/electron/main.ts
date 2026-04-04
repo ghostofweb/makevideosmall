@@ -69,9 +69,25 @@ app.on("ready", () => {
     mainWindow.setIcon(getIconPath());
   });
 
-  mainWindow.once('ready-to-show', () => {
+ mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
+
+    // 1. Check for updates ONLY after the window is ready
+    if (!isDev()) {
+      autoUpdater.checkForUpdatesAndNotify();
+    }
+  });
+
+  // 2. Tell React when the update is fully downloaded and ready to install
+  autoUpdater.on('update-downloaded', () => {
+    console.log('[UPDATER] Update downloaded! Notifying React...');
+    mainWindow.webContents.send('update-downloaded');
+  });
+
+  // 3. Listen for React telling us the user clicked "Restart"
+  ipcMain.on('restart-to-update', () => {
+    autoUpdater.quitAndInstall();
   });
 
   mainWindow.webContents.on('devtools-opened', () => {

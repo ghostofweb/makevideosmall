@@ -1,6 +1,6 @@
 {
   "name": "make-video-small",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": false,
   "type": "module",
   "description": "Professional AV1 Video Compression Studio",
@@ -16,7 +16,7 @@
     "dev:electron": "npm run transpile:electron && electron .",
     "build": "npm run transpile:electron && tsc -b && vite build",
     "transpile:electron": "tsc --project src/electron/tsconfig.json",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish always"
+    "dist:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
     "electron-updater": "^6.8.3",
