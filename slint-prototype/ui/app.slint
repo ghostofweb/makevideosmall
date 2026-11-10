@@ -1,0 +1,695 @@
+// Make Video Small — native interface prototype.
+// Same layout and colours as the web version: videos, compare + choices, queue.
+
+import { ListView } from "std-widgets.slint";
+
+export struct VideoRow {
+    name: string,
+    detail: string,
+    thumb: image,
+    has-thumb: bool,
+}
+
+export struct Choice {
+    title: string,
+    hint: string,
+    size: string,
+    saving: string,
+    look: string,
+    time: string,
+    measured: bool,
+    suggested: bool,
+    bigger: bool,
+}
+
+export struct JobRow {
+    name: string,
+    detail: string,
+    status: string,
+    progress: float,
+    active: bool,
+    done: bool,
+    failed: bool,
+}
+
+global Theme {
+    out property <color> bg: #151821;
+    out property <color> panel: #1b1f2a;
+    out property <color> raised: #242938;
+    out property <color> stage: #0d0f15;
+    out property <color> border: #2e3446;
+    out property <color> faint: #5f6679;
+    out property <color> muted: #8f96a9;
+    out property <color> fg: #eceef3;
+    out property <color> primary: #f5b83d;
+    out property <color> on-primary: #1c1503;
+    out property <color> saved: #4cc9b0;
+    out property <color> bad: #f0616d;
+}
+
+component Btn inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <length> text-size: 13px;
+    callback clicked;
+
+    height: 34px;
+    min-width: label.preferred-width + 28px;
+    border-radius: 6px;
+    border-width: root.primary ? 0px : 1px;
+    border-color: Theme.border;
+    background: root.primary
+        ? (touch.has-hover && root.enabled ? #ffc85a : Theme.primary)
+        : (touch.has-hover && root.enabled ? Theme.raised : transparent);
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    label := Text {
+        text: root.text;
+        color: root.primary ? Theme.on-primary : Theme.fg;
+        font-size: root.text-size;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component PaneTitle inherits Rectangle {
+    in property <string> text;
+    in property <string> count;
+    height: 44px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.count;
+            color: Theme.muted;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        @children
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+component ChoiceCard inherits Rectangle {
+    in property <Choice> data;
+    in property <bool> selected;
+    in property <bool> checking;
+    callback picked;
+
+    min-height: 132px;
+    min-width: 150px;
+    horizontal-stretch: 1;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: root.selected ? Theme.primary : (touch.has-hover ? Theme.faint : Theme.border);
+    background: root.selected ? #f5b83d14 : Theme.panel;
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.data.title;
+                color: Theme.fg;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.data.suggested: Rectangle {
+                width: badge.preferred-width + 12px;
+                height: 18px;
+                border-radius: 4px;
+                background: Theme.primary;
+                badge := Text {
+                    text: "Suggested";
+                    color: Theme.on-primary;
+                    font-size: 11px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border-width: 2px;
+                border-color: root.selected ? Theme.primary : Theme.faint;
+                background: root.selected ? Theme.primary : transparent;
+                if root.selected: Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.on-primary;
+                }
+            }
+        }
+
+        if root.data.measured: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: root.data.size;
+                color: Theme.fg;
+                font-size: 22px;
+                font-weight: 500;
+            }
+            Text {
+                text: root.data.saving;
+                color: root.data.bigger ? Theme.bad : Theme.saved;
+                font-weight: 500;
+                vertical-alignment: bottom;
+                overflow: elide;
+            }
+        }
+        if root.data.measured: Text {
+            text: root.data.look;
+            color: Theme.fg;
+            wrap: word-wrap;
+        }
+        if root.data.measured: Text {
+            text: root.data.time;
+            color: Theme.muted;
+            font-size: 12px;
+        }
+        if !root.data.measured: Text {
+            text: root.data.hint;
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if !root.data.measured && root.checking: Text {
+            text: "Working out the size…";
+            color: Theme.faint;
+            font-size: 12px;
+        }
+    }
+}
+
+export component App inherits Window {
+    title: "Make Video Small";
+    preferred-width: 1320px;
+    preferred-height: 820px;
+    min-width: 1040px;
+    min-height: 660px;
+    background: Theme.bg;
+    default-font-size: 13px;
+    default-font-family: "Segoe UI";
+
+    // Videos
+    in property <[VideoRow]> videos;
+    in property <string> video-count;
+    in property <int> selected: -1;
+    // The selected video
+    in property <string> heading: "Nothing to set up yet";
+    in property <string> advice;
+    in property <string> info;
+    in property <string> save-as;
+    in property <[Choice]> choices;
+    in property <int> chosen: 1;
+    in property <bool> checking;
+    in property <float> check-progress;
+    in property <string> check-stage;
+    in property <image> original;
+    in property <image> result;
+    in property <bool> has-frame;
+    in property <bool> has-compare;
+    in property <string> result-caption;
+    // Queue
+    in property <[JobRow]> jobs;
+    in property <string> queue-summary;
+    in property <bool> can-start;
+    in property <string> status: "Starting…";
+
+    callback add-videos();
+    callback select-video(int);
+    callback remove-video(int);
+    callback choose(int);
+    callback add-to-queue();
+    callback start-queue();
+    callback clear-finished();
+
+    // Where the before/after divider sits, 0 – 1.
+    property <float> split: 0.5;
+
+    HorizontalLayout {
+        // ───────────── Videos ─────────────
+        Rectangle {
+            width: 300px;
+            horizontal-stretch: 0;
+            background: Theme.panel;
+            VerticalLayout {
+                PaneTitle {
+                    text: "Videos";
+                    count: root.video-count;
+                    Btn {
+                        text: "Add";
+                        height: 28px;
+                        clicked => { root.add-videos(); }
+                    }
+                }
+                if root.videos.length == 0: VerticalLayout {
+                    alignment: center;
+                    spacing: 12px;
+                    padding: 24px;
+                    Text {
+                        text: "Add a video to begin";
+                        color: Theme.fg;
+                        font-size: 15px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "The app checks it and shows you three sizes to choose from.";
+                        color: Theme.muted;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        Btn {
+                            text: "Add videos";
+                            primary: true;
+                            clicked => { root.add-videos(); }
+                        }
+                    }
+                }
+                if root.videos.length > 0: ListView {
+                    for v[i] in root.videos: Rectangle {
+                        height: 64px;
+                        background: i == root.selected ? #2a3041cc : (row-touch.has-hover ? #2a304166 : transparent);
+                        row-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.select-video(i); }
+                        }
+                        if i == root.selected: Rectangle {
+                            x: 0;
+                            width: 2px;
+                            background: Theme.primary;
+                        }
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 6px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            spacing: 10px;
+                            Rectangle {
+                                width: 76px;
+                                border-radius: 3px;
+                                background: Theme.stage;
+                                clip: true;
+                                if v.has-thumb: Image {
+                                    width: 100%;
+                                    height: 100%;
+                                    source: v.thumb;
+                                    image-fit: cover;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: v.name;
+                                    color: Theme.fg;
+                                    font-weight: 500;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: v.detail;
+                                    color: Theme.muted;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+                            }
+                            Rectangle {
+                                width: 22px;
+                                Text {
+                                    text: "✕";
+                                    color: remove-touch.has-hover ? Theme.fg : Theme.faint;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                remove-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.remove-video(i); }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.border;
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.border;
+            }
+        }
+
+        // ───────────── Compare + choices ─────────────
+        VerticalLayout {
+            horizontal-stretch: 1;
+            min-width: 420px;
+
+            stage := Rectangle {
+                vertical-stretch: 1;
+                min-height: 200px;
+                background: Theme.stage;
+                clip: true;
+
+                // Result underneath, original clipped on top of it up to the divider.
+                if root.has-frame || root.has-compare: Image {
+                    width: stage.width;
+                    height: stage.height;
+                    source: root.has-compare ? root.result : root.original;
+                    image-fit: contain;
+                }
+                if root.has-compare: Rectangle {
+                    x: 0;
+                    width: stage.width * root.split;
+                    height: stage.height;
+                    clip: true;
+                    Image {
+                        x: 0;
+                        width: stage.width;
+                        height: stage.height;
+                        source: root.original;
+                        image-fit: contain;
+                    }
+                }
+                if root.has-compare: Rectangle {
+                    x: stage.width * root.split - 1px;
+                    width: 2px;
+                    height: stage.height;
+                    background: white;
+                }
+                if root.has-compare: Rectangle {
+                    x: stage.width * root.split - 16px;
+                    y: stage.height / 2 - 16px;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    background: #00000099;
+                    border-width: 2px;
+                    border-color: white;
+                    Text {
+                        text: "◂ ▸";
+                        color: white;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.has-compare: TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        if (self.pressed) {
+                            root.split = clamp(self.mouse-x / stage.width, 0.02, 0.98);
+                        }
+                    }
+                    clicked => {
+                        root.split = clamp(self.mouse-x / stage.width, 0.02, 0.98);
+                    }
+                }
+                if root.has-compare: Rectangle {
+                    x: 8px;
+                    y: stage.height - 30px;
+                    width: left-label.preferred-width + 16px;
+                    height: 22px;
+                    border-radius: 3px;
+                    background: #000000b3;
+                    left-label := Text {
+                        text: "Original";
+                        color: white;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.has-compare: Rectangle {
+                    x: stage.width - self.width - 8px;
+                    y: stage.height - 30px;
+                    width: right-label.preferred-width + 16px;
+                    height: 22px;
+                    border-radius: 3px;
+                    background: #000000b3;
+                    right-label := Text {
+                        text: root.result-caption;
+                        color: white;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.checking: Rectangle {
+                    background: #0d0f15cc;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        Text {
+                            text: root.check-stage;
+                            color: Theme.fg;
+                            font-weight: 500;
+                            horizontal-alignment: center;
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 280px;
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Theme.raised;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * clamp(root.check-progress, 0, 1);
+                                    border-radius: 2px;
+                                    background: Theme.primary;
+                                    animate width { duration: 250ms; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.border;
+            }
+
+            VerticalLayout {
+                vertical-stretch: 0;
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 16px;
+                padding-bottom: 18px;
+                spacing: 6px;
+
+                HorizontalLayout {
+                    height: 26px;
+                    Text {
+                        text: root.heading;
+                        color: Theme.fg;
+                        font-size: 17px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.info;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.advice != "": Text {
+                    text: root.advice;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 4px; }
+
+                HorizontalLayout {
+                    height: 136px;
+                    spacing: 12px;
+                    for c[i] in root.choices: ChoiceCard {
+                        data: c;
+                        selected: i == root.chosen;
+                        checking: root.checking;
+                        horizontal-stretch: 1;
+                        picked => { root.choose(i); }
+                    }
+                }
+
+                Rectangle { height: 6px; }
+
+                HorizontalLayout {
+                    height: 40px;
+                    spacing: 12px;
+                    Text {
+                        text: root.save-as;
+                        color: Theme.muted;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Btn {
+                        text: "Add to queue";
+                        primary: true;
+                        text-size: 15px;
+                        height: 40px;
+                        min-width: 150px;
+                        enabled: root.selected >= 0;
+                        clicked => { root.add-to-queue(); }
+                    }
+                }
+            }
+        }
+
+        // ───────────── Queue ─────────────
+        Rectangle {
+            width: 330px;
+            horizontal-stretch: 0;
+            background: Theme.panel;
+            Rectangle {
+                x: 0;
+                width: 1px;
+                background: Theme.border;
+            }
+            VerticalLayout {
+                PaneTitle {
+                    text: "Queue";
+                    count: root.queue-summary;
+                    Btn {
+                        text: "Start";
+                        primary: true;
+                        height: 30px;
+                        enabled: root.can-start;
+                        clicked => { root.start-queue(); }
+                    }
+                }
+                if root.jobs.length == 0: VerticalLayout {
+                    alignment: center;
+                    spacing: 10px;
+                    padding: 28px;
+                    Text {
+                        text: "The queue is empty";
+                        color: Theme.fg;
+                        font-size: 15px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "Pick a size for a video, then choose \"Add to queue\".";
+                        color: Theme.muted;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                }
+                if root.jobs.length > 0: ListView {
+                    for j in root.jobs: Rectangle {
+                        height: 78px;
+                        VerticalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            spacing: 4px;
+                            Text {
+                                text: j.name;
+                                color: Theme.fg;
+                                font-weight: 500;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: j.detail;
+                                color: Theme.muted;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                            Rectangle {
+                                height: 6px;
+                                border-radius: 3px;
+                                background: Theme.raised;
+                                visible: j.active || j.done;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * clamp(j.progress, 0, 1);
+                                    border-radius: 3px;
+                                    background: j.done ? Theme.saved : Theme.primary;
+                                    animate width { duration: 300ms; }
+                                }
+                            }
+                            Text {
+                                text: j.status;
+                                color: j.failed ? Theme.bad : (j.done ? Theme.saved : (j.active ? Theme.primary : Theme.muted));
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.border;
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    Text {
+                        text: root.status;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Btn {
+                        text: "Clear finished";
+                        height: 28px;
+                        clicked => { root.clear-finished(); }
+                    }
+                }
+            }
+        }
+    }
+}
