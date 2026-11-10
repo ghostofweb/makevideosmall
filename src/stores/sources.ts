@@ -33,6 +33,11 @@ export interface Source {
   easyStage: string;
   easyProgress: number;
   easyError: string | null;
+  /**
+   * Identifies the check that is running. Every check gets its own, so a late
+   * answer from one that was cancelled can never be mistaken for the current one.
+   */
+  easyToken: string | null;
 }
 
 interface SourcesState {
@@ -73,6 +78,12 @@ interface SourcesState {
 const STORAGE_KEY = 'mvs.sources.v2';
 let counter = 0;
 const newId = () => `s${Date.now().toString(36)}${(counter++).toString(36)}`;
+
+/** Stop a video's running check, if it has one. */
+function stopCheck(source: Source) {
+  if (source.easyToken) api.cancelAnalysis(source.easyToken).catch(() => {});
+}
+const NOT_CHECKING = { easyState: 'idle', easyToken: null, easyError: null } as const;
 
 export const isJoined = (source: Pick<Source, 'spec'>) => (source.spec.extraInputs?.length ?? 0) > 0;
 
@@ -131,6 +142,7 @@ function fresh(media: MediaInfo, spec: JobSpec, presetId: string | null, choice:
     easyStage: '',
     easyProgress: 0,
     easyError: null,
+    easyToken: null,
   };
 }
 
@@ -217,9 +229,9 @@ export const useSources = create<SourcesState>((set, get) => ({
   },
 
   remove: (ids) => {
-    for (const id of ids) {
-      api.cancelAnalysis(`estimate-${id}`).catch(() => {});
-      api.cancelAnalysis(`easy-${id}`).catch(() => {});
+    for (const source of get().sources.filter((x) => ids.includes(x.id))) {
+      api.cancelAnalysis(`estimate-${source.id}`).catch(() => {});
+      stopCheck(source);
     }
     set((s) => {
       const sources = s.sources.filter((x) => !ids.includes(x.id));
@@ -327,29 +339,41 @@ export const useSources = create<SourcesState>((set, get) => ({
     // One at a time: two checks running together would slow each other down
     // and make every "takes about" figure too high. The other one starts over
     // when its video is looked at again.
-    for (const other of get().sources) {
-      if (other.id !== id && other.easyState === 'running') api.cancelAnalysis(`easy-${other.id}`).catch(() => {});
-    }
-    set((s) => patch(s, id, { easyState: 'running', easyStage: 'Starting', easyProgress: 0, easyError: null }));
+    const others = get().sources.filter((x) => x.id !== id && x.easyState === 'running');
+    others.forEach(stopCheck);
+    const token = `easy-${id}-${counter++}`;
+    set((s) => ({
+      sources: s.sources.map((x) =>
+        x.id === id
+          ? { ...x, easyState: 'running', easyStage: 'Starting', easyProgress: 0, easyError: null, easyToken: token }
+          : others.some((o) => o.id === x.id)
+            ? { ...x, ...NOT_CHECKING }
+            : x,
+      ),
+    }));
+    // Only the check that is still the current one may report back.
+    const current = () => get().sources.find((s) => s.id === id && s.easyToken === token);
     try {
-      const easy = await api.easyAnalyze(source.spec, `easy-${id}`);
-      const now = get().sources.find((s) => s.id === id);
+      const easy = await api.easyAnalyze(source.spec, token);
+      const now = current();
       if (!now) return;
-      set((s) => patch(s, id, { easy, easyState: 'idle', analysis: easy.analysis }));
+      set((s) => patch(s, id, { easy, analysis: easy.analysis, ...NOT_CHECKING }));
       // Still on a simple choice: switch to the measured version of it, or to
       // the suggestion if the person has not chosen for themselves.
       if (now.choice !== null) {
         await get().pickChoice(id, now.pickedByUser ? now.choice : easy.recommended, false);
       }
     } catch (e) {
+      if (!current()) return;
       const text = errorText(e);
-      set((s) => patch(s, id, text === 'Cancelled' ? { easyState: 'idle' } : { easyState: 'failed', easyError: text }));
+      set((s) => patch(s, id, text === 'Cancelled' ? NOT_CHECKING : { easyState: 'failed', easyError: text, easyToken: null }));
     }
   },
 
   onEasyProgress: (p) => {
-    if (!p.token.startsWith('easy-')) return;
-    set((s) => patch(s, p.token.slice(5), { easyStage: p.stage, easyProgress: p.progress }));
+    set((s) => ({
+      sources: s.sources.map((x) => (x.easyToken === p.token ? { ...x, easyStage: p.stage, easyProgress: p.progress } : x)),
+    }));
   },
 
   join: async (ids) => {
@@ -373,7 +397,7 @@ export const useSources = create<SourcesState>((set, get) => ({
         customOutput: true,
         thumb: chosen[0].thumb,
       };
-      for (const id of ids) api.cancelAnalysis(`easy-${id}`).catch(() => {});
+      chosen.forEach(stopCheck);
       set((s) => {
         const at = s.sources.findIndex((x) => x.id === ids[0]);
         const rest = s.sources.filter((x) => !ids.includes(x.id));
@@ -490,8 +514,8 @@ useSources.subscribe((state, previous) => {
 useApp.subscribe((state, previous) => {
   if (state.easyOptions === previous.easyOptions || previous.easyOptions.length === 0) return;
   const { sources, pickChoice } = useSources.getState();
-  for (const source of sources) api.cancelAnalysis(`easy-${source.id}`).catch(() => {});
-  useSources.setState((s) => ({ sources: s.sources.map((x) => ({ ...x, easy: null, easyState: 'idle' as const, easyError: null })) }));
+  sources.forEach(stopCheck);
+  useSources.setState((s) => ({ sources: s.sources.map((x) => ({ ...x, easy: null, ...NOT_CHECKING })) }));
   for (const source of sources) {
     if (source.choice) void pickChoice(source.id, source.choice, false);
   }

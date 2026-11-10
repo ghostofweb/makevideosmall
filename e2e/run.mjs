@@ -181,6 +181,7 @@ await scenario('Simple video flow', { files: [holiday, screen, tape] }, async (p
   await shot(page, 'join-ready');
   await editor.getByRole('button', { name: 'Add to queue' }).click();
   await waitFor('two jobs in the queue', async () => (await queue.locator('li').count()) === 2);
+  await waitFor('the queued videos to leave the list', async () => (await files.locator('li').count()) === 0, 5000).catch(() => {});
   check('The video list is empty once everything is queued', (await files.locator('li').count()) === 0);
 
   // Drag the second job to the top.
