@@ -5,6 +5,7 @@
 //! layer that exposes them to the Tauri window.
 
 pub mod analysis;
+pub mod background;
 pub mod error;
 pub mod ffmpeg;
 pub mod image;

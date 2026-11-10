@@ -1,1 +1,147 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Palette: a blue-graphite edit bay. Saffron marks what you act on and what
+ * is in motion; teal is reserved for space saved; coral for failures.
+ */
+:root,
+.dark {
+  --radius: 0.4rem;
+
+  --background: #151821;
+  --foreground: #eceef3;
+  --card: #1b1f2a;
+  --card-foreground: #eceef3;
+  --popover: #1f2430;
+  --popover-foreground: #eceef3;
+  --primary: #f5b83d;
+  --primary-foreground: #1c1503;
+  --secondary: #262b3a;
+  --secondary-foreground: #eceef3;
+  --muted: #20242f;
+  --muted-foreground: #8f96a9;
+  --accent: #2a3041;
+  --accent-foreground: #eceef3;
+  --destructive: #f0616d;
+  --border: #2e3446;
+  --input: #363d52;
+  --ring: #f5b83d;
+
+  --panel: #1b1f2a;
+  --raised: #242938;
+  --stage: #0d0f15;
+  --saved: #4cc9b0;
+  --faint: #5f6679;
+}
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-readout: "IBM Plex Sans Condensed", "IBM Plex Sans", "Segoe UI", sans-serif;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-stage: var(--stage);
+  --color-saved: var(--saved);
+  --color-faint: var(--faint);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    margin: 0;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    /* A desktop tool, not a document: text is not selectable by default. */
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  .selectable {
+    user-select: text;
+    cursor: text;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--faint);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  /* Numbers that change in place: condensed face, fixed-width digits. */
+  .readout {
+    font-family: var(--font-readout);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

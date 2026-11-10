@@ -493,6 +493,9 @@ pub struct JobSpec {
     pub trim: Option<Trim>,
     /// Result of black-bar detection, used when `video.crop` is `Auto`.
     pub auto_crop: Option<Crop>,
+    /// More videos to join onto the end of `input`, in this order.
+    #[serde(default)]
+    pub extra_inputs: Vec<String>,
 }
 
 // ───────────────────────────── Presets ─────────────────────────────
@@ -638,6 +641,7 @@ pub struct Capabilities {
     pub ffmpeg_version: String,
     pub encoders: Vec<EncoderInfo>,
     pub upscaler_available: bool,
+    pub background_removal_available: bool,
 }
 
 // ───────────────────────────── Analysis ─────────────────────────────
@@ -687,6 +691,59 @@ pub struct AnalysisProgress {
     pub token: String,
     pub progress: f64,
     pub stage: String,
+}
+
+/// One of the three choices offered in the simple view.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EasyOption {
+    /// "best" | "balanced" | "smallest"
+    pub id: String,
+    pub title: String,
+    pub hint: String,
+    pub settings: EncodeSettings,
+}
+
+/// A simple choice after it has been tried on the video.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EasyChoice {
+    pub id: String,
+    /// The job this choice would queue (black bars already cropped).
+    pub spec: JobSpec,
+    pub estimate: Estimate,
+    /// A short clip encoded with this choice, playable in the app.
+    pub preview: String,
+    /// 0 – 1: how close the clip looks to the original (VMAF ÷ 100).
+    pub similarity: f64,
+    /// The same thing in words, e.g. "Looks the same as the original".
+    pub look: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EasyAnalysis {
+    pub analysis: SourceAnalysis,
+    /// The matching clip from the source, for side-by-side comparison.
+    pub original: String,
+    pub choices: Vec<EasyChoice>,
+    /// Id of the suggested choice.
+    pub recommended: String,
+    /// Why, in one sentence.
+    pub advice: String,
+}
+
+/// A set of videos prepared for joining.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Joined {
+    pub spec: JobSpec,
+    /// Describes the joined result: total length and size, shape of the first clip.
+    pub media: MediaInfo,
 }
 
 // ───────────────────────────── System ─────────────────────────────
@@ -739,6 +796,10 @@ pub struct AppSettings {
     pub play_sound_on_finish: bool,
     pub custom_sound_path: Option<String>,
     pub default_preset_id: String,
+    /// Use the graphics card for the simple choices when it can encode video.
+    pub prefer_gpu: bool,
+    /// Show the detailed controls instead of the three simple choices.
+    pub advanced_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -754,6 +815,8 @@ impl Default for AppSettings {
             play_sound_on_finish: false,
             custom_sound_path: None,
             default_preset_id: "balanced".into(),
+            prefer_gpu: true,
+            advanced_mode: false,
         }
     }
 }
@@ -804,6 +867,8 @@ pub enum ImageAction {
     Target { kb: u32 },
     /// 4× AI upscale with Real-ESRGAN. Output is always PNG.
     Upscale,
+    /// Cut the subject out; the background becomes transparent. Output is always PNG.
+    RemoveBackground,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
@@ -815,6 +880,9 @@ pub struct ImageJob {
     pub output: String,
     pub action: ImageAction,
     pub format: ImageFormat,
+    /// Keep only this part of the picture.
+    #[serde(default)]
+    pub crop: Option<Crop>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]

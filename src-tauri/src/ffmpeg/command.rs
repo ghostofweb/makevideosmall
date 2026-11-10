@@ -15,6 +15,8 @@ pub struct PlanOptions {
     /// its working directory set to a temp folder, so a bare name is enough —
     /// and it keeps Windows drive colons out of `-x265-params`.
     pub pass_log: String,
+    /// What ffprobe says about each of `JobSpec::extra_inputs`, in the same order.
+    pub joined: Vec<MediaInfo>,
 }
 
 impl Default for PlanOptions {
@@ -22,6 +24,7 @@ impl Default for PlanOptions {
         PlanOptions {
             hw_decode: true,
             pass_log: "mvs_2pass".into(),
+            joined: Vec::new(),
         }
     }
 }
@@ -760,6 +763,9 @@ pub fn plan(spec: &JobSpec, media: &MediaInfo, opts: &PlanOptions) -> Result<Pla
     if spec.input == spec.output {
         return Err(AppError::msg("The output file would overwrite the source file."));
     }
+    if !spec.extra_inputs.is_empty() {
+        return plan_join(spec, media, opts);
+    }
     let vs = &spec.settings.video;
     let enc = vs.encoder;
     let container = spec.settings.container;
@@ -903,6 +909,174 @@ pub fn plan(spec: &JobSpec, media: &MediaInfo, opts: &PlanOptions) -> Result<Pla
         duration,
         warnings,
         hwaccel: gpu_pipeline,
+        video_kbps,
+        width: geo.width,
+        height: geo.height,
+    })
+}
+
+/// The joined result seen as one clip: the first clip's shape, everyone's length.
+pub fn joined_media(first: &MediaInfo, rest: &[MediaInfo]) -> MediaInfo {
+    let mut whole = first.clone();
+    whole.duration = first.duration + rest.iter().map(|m| m.duration).sum::<f64>();
+    whole.size_bytes = first.size_bytes + rest.iter().map(|m| m.size_bytes).sum::<f64>();
+    if whole.duration > 0.0 {
+        whole.bitrate = whole.size_bytes * 8.0 / whole.duration;
+    }
+    whole.file_name = match rest.len() {
+        0 => first.file_name.clone(),
+        1 => format!("{} + 1 more", first.file_name),
+        n => format!("{} + {n} more", first.file_name),
+    };
+    whole.subtitles.clear();
+    whole.chapters = 0;
+    whole
+}
+
+/// Join several videos end to end.
+///
+/// Every clip is fitted into the first clip's frame (black bars where the
+/// shape differs), brought to one frame rate and one audio layout, and the
+/// result is encoded once with the job's settings.
+fn plan_join(spec: &JobSpec, first: &MediaInfo, opts: &PlanOptions) -> Result<Plan> {
+    let vs = &spec.settings.video;
+    let enc = vs.encoder;
+    let container = spec.settings.container;
+    if opts.joined.len() != spec.extra_inputs.len() {
+        return Err(AppError::msg("The videos to join could not be read."));
+    }
+    if enc == VideoEncoder::Copy {
+        return Err(AppError::msg("Joining videos re-encodes them, so \"Copy\" cannot be used. Choose another encoder."));
+    }
+    if container == Container::Webm && enc.codec() != Codec::Av1 {
+        return Err(AppError::msg("WebM only supports AV1 here. Choose an AV1 encoder or another container."));
+    }
+    if spec.extra_inputs.iter().any(|p| *p == spec.output) {
+        return Err(AppError::msg("The output file would overwrite one of the videos being joined."));
+    }
+    let clips: Vec<&MediaInfo> = std::iter::once(first).chain(opts.joined.iter()).collect();
+    if let Some(bad) = clips.iter().find(|c| c.video.is_none()) {
+        return Err(AppError::msg(format!("{} has no video, so it cannot be joined.", bad.file_name)));
+    }
+    let v0 = first.video.as_ref().expect("checked above");
+    let (w, h) = display_size(v0);
+    let (w, h) = (even(w), even(h));
+    let fps = match vs.fps {
+        Fps::Fixed { value } if value > 0.0 => value,
+        _ => v0.fps,
+    };
+    let with_audio = !spec.audio_tracks.is_empty() && clips.iter().any(|c| !c.audio.is_empty());
+    let mut warnings = Vec::new();
+    if clips.iter().any(|c| c.video.as_ref().map(display_size) != Some(display_size(v0))) {
+        warnings.push(format!("The videos are different shapes. Each one is fitted into {w}×{h}, with black bars where needed."));
+    }
+    if clips.iter().any(|c| c.video.as_ref().map(|v| v.is_hdr).unwrap_or(false)) {
+        warnings.push("HDR is not kept when videos are joined.".into());
+    }
+
+    // From here on the join behaves like one long clip shaped like the first.
+    let whole = joined_media(first, &opts.joined);
+    let mut one = spec.clone();
+    one.extra_inputs.clear();
+    one.trim = None;
+    one.subtitle_tracks.clear();
+    one.settings.video.fps = Fps::Source;
+    one.settings.video.hdr = HdrMode::Keep;
+    if one.settings.video.crop == CropMode::Auto {
+        // Black bars differ from clip to clip.
+        one.settings.video.crop = CropMode::None;
+    }
+    let geo = geometry(&one, &whole);
+    let post = match build_graph(&one, &whole, &geo, ChainParts::ALL) {
+        Graph::Simple(chain) => chain,
+        _ => "null".to_string(),
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    for (i, clip) in clips.iter().enumerate() {
+        parts.push(format!(
+            "[{i}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={},format=yuv420p,setpts=PTS-STARTPTS[v{i}]",
+            fps_expr(fps)
+        ));
+        if with_audio {
+            parts.push(if clip.audio.is_empty() {
+                // A silent clip still needs sound of the right length.
+                format!("anullsrc=r=48000:cl=stereo,atrim=duration={}[a{i}]", secs(clip.duration))
+            } else {
+                format!("[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{i}]")
+            });
+        }
+    }
+    let n = clips.len();
+    let pads: String = (0..n)
+        .map(|i| if with_audio { format!("[v{i}][a{i}]") } else { format!("[v{i}]") })
+        .collect();
+    parts.push(if with_audio {
+        format!("{pads}concat=n={n}:v=1:a=1[vcat][acat]")
+    } else {
+        format!("{pads}concat=n={n}:v=1:a=0[vcat]")
+    });
+    parts.push(format!("[vcat]{post}[vout]"));
+    let graph = parts.join(";");
+
+    let depth = output_depth(vs, v0, true).max(if vs.bit_depth == BitDepth::Ten && enc.supports_ten_bit() { 10 } else { 8 });
+    let rate = resolve_rate(&one, &whole);
+    let video_kbps = match rate {
+        Rate::Bitrate(k) => Some(k),
+        Rate::Quality(_) => None,
+    };
+    let two_pass = vs.two_pass && enc.supports_two_pass() && matches!(rate, Rate::Bitrate(_));
+
+    let audio_codec = spec.audio_tracks.first().map(|t| match (t.codec, container) {
+        (_, Container::Webm) => AudioCodec::Opus,
+        (AudioCodec::Copy, _) => AudioCodec::Aac,
+        (AudioCodec::Opus | AudioCodec::Flac, Container::Mov) => AudioCodec::Aac,
+        (codec, _) => codec,
+    });
+    let audio_kbps = spec.audio_tracks.first().map(|t| t.bitrate_kbps.clamp(64, 1024)).unwrap_or(160);
+
+    let build = |pass: Option<u8>| -> Vec<String> {
+        let mut a: Vec<String> = Vec::new();
+        push(&mut a, &["-hide_banner", "-y", "-nostdin", "-loglevel", "warning", "-nostats", "-progress", "pipe:1"]);
+        a.extend(["-i".into(), spec.input.clone()]);
+        for extra in &spec.extra_inputs {
+            a.extend(["-i".into(), extra.clone()]);
+        }
+        a.extend(["-filter_complex".into(), graph.clone(), "-map".into(), "[vout]".into()]);
+        a.extend(video_encoder_args(&EncodeCtx { vs, rate, depth, pass, pass_log: &opts.pass_log, set_pix_fmt: true }));
+        if enc.codec() == Codec::Hevc && matches!(container, Container::Mp4 | Container::Mov) {
+            push(&mut a, &["-tag:v", "hvc1"]);
+        }
+        if pass == Some(1) {
+            push(&mut a, &["-an", "-sn", "-f", "null", "-"]);
+            return a;
+        }
+        if let (true, Some(codec)) = (with_audio, audio_codec) {
+            let name = match codec {
+                AudioCodec::Opus => "libopus",
+                AudioCodec::Ac3 => "ac3",
+                AudioCodec::Flac => "flac",
+                _ => "aac",
+            };
+            a.extend(["-map".into(), "[acat]".into(), "-c:a".into(), name.into()]);
+            if codec != AudioCodec::Flac {
+                a.extend(["-b:a".into(), format!("{audio_kbps}k")]);
+            }
+        }
+        push(&mut a, &["-map_metadata", "-1", "-map_chapters", "-1", "-max_muxing_queue_size", "2048"]);
+        if matches!(container, Container::Mp4 | Container::Mov) {
+            push(&mut a, &["-movflags", "+faststart"]);
+        }
+        a.push(spec.output.clone());
+        a
+    };
+
+    let passes = if two_pass { vec![build(Some(1)), build(Some(2))] } else { vec![build(None)] };
+    Ok(Plan {
+        passes,
+        duration: whole.duration,
+        warnings,
+        hwaccel: false,
         video_kbps,
         width: geo.width,
         height: geo.height,
@@ -1098,11 +1272,12 @@ mod tests {
             subtitle_tracks: vec![],
             trim: None,
             auto_crop: None,
+            extra_inputs: Vec::new(),
         }
     }
 
     fn opts() -> PlanOptions {
-        PlanOptions { hw_decode: false, pass_log: "log".into() }
+        PlanOptions { hw_decode: false, pass_log: "log".into(), joined: Vec::new() }
     }
 
     /// Value following a flag, e.g. `val(args, "-crf")`.
@@ -1527,6 +1702,96 @@ mod tests {
         let p = plan(&sample, &media(), &opts()).unwrap();
         assert_eq!(p.passes.len(), 1);
         assert_eq!(p.duration, 3.0);
+    }
+
+    #[test]
+    fn joins_clips_into_one() {
+        let mut second = media();
+        second.file_name = "b.mp4".into();
+        second.duration = 30.0;
+        second.size_bytes = 5e7;
+        second.video.as_mut().unwrap().width = 1280;
+        second.video.as_mut().unwrap().height = 720;
+        let mut silent = media();
+        silent.duration = 12.5;
+        silent.audio.clear();
+
+        let mut s = spec(VideoEncoder::X264, Container::Mp4);
+        s.extra_inputs = vec!["C:/in/b.mp4".into(), "C:/in/c.mp4".into()];
+        s.trim = Some(Trim { start: 5.0, end: 10.0 });
+        s.subtitle_tracks = vec![SubtitleTrack { order: 0, mode: SubtitleMode::Copy, default: true }];
+        let o = PlanOptions { joined: vec![second.clone(), silent.clone()], ..opts() };
+        let p = plan(&s, &media(), &o).unwrap();
+        let a = &p.passes[0];
+
+        // Three inputs, in order.
+        let inputs: Vec<&str> = a.windows(2).filter(|w| w[0] == "-i").map(|w| w[1].as_str()).collect();
+        assert_eq!(inputs, ["C:/in/movie.mkv", "C:/in/b.mp4", "C:/in/c.mp4"]);
+        // Total length; the trim does not apply to a join.
+        assert_eq!(p.duration, 642.5);
+        assert!(!has(a, "-ss") && !has(a, "-t"));
+
+        let g = val(a, "-filter_complex").unwrap();
+        assert!(g.contains("[1:v:0]scale=1920:1080:force_original_aspect_ratio=decrease"), "{g}");
+        assert!(g.contains("fps=24000/1001"));
+        // The clip without sound gets silence of its own length.
+        assert!(g.contains("anullsrc=r=48000:cl=stereo,atrim=duration=12.5[a2]"), "{g}");
+        assert!(g.contains("[v0][a0][v1][a1][v2][a2]concat=n=3:v=1:a=1[vcat][acat]"), "{g}");
+        assert!(g.ends_with("[vcat]null[vout]"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[acat]"));
+        assert_eq!(val(a, "-c:a"), Some("aac"));
+        assert!(!has(a, "-c:s:0"), "subtitles are not carried into a join");
+        assert!(p.warnings.iter().any(|w| w.contains("different shapes")));
+        assert!(!p.hwaccel);
+
+        // Scaling applies to the joined result; no audio at all drops the audio leg.
+        s.settings.video.resolution = Resolution::Height { value: 720 };
+        s.audio_tracks.clear();
+        let p = plan(&s, &media(), &o).unwrap();
+        let g = val(&p.passes[0], "-filter_complex").unwrap();
+        assert!(g.contains("concat=n=3:v=1:a=0[vcat]") && g.ends_with("[vcat]scale=1280:720:flags=lanczos[vout]"), "{g}");
+        assert!(!has(&p.passes[0], "-c:a"));
+
+        // A size target is spread over the whole joined length.
+        s.settings.video.rate = RateControl::TargetSize { mb: 100.0 };
+        let p = plan(&s, &media(), &o).unwrap();
+        assert_eq!(p.video_kbps, Some(target_video_kbps(100.0, 642.5, 0.0)));
+    }
+
+    #[test]
+    fn join_rejects_what_cannot_work() {
+        let mut s = spec(VideoEncoder::X264, Container::Mp4);
+        s.extra_inputs = vec!["C:/in/b.mp4".into()];
+        // Media for the second clip is missing.
+        assert!(plan(&s, &media(), &opts()).is_err());
+        let o = PlanOptions { joined: vec![media()], ..opts() };
+        assert!(plan(&s, &media(), &o).is_ok());
+
+        s.settings.video.encoder = VideoEncoder::Copy;
+        assert!(plan(&s, &media(), &o).unwrap_err().to_string().contains("Copy"));
+        s.settings.video.encoder = VideoEncoder::X264;
+
+        s.output = "C:/in/b.mp4".into();
+        assert!(plan(&s, &media(), &o).is_err());
+        s.output = "C:/out/joined.mp4".into();
+
+        let mut audio_only = media();
+        audio_only.video = None;
+        audio_only.file_name = "song.mp3".into();
+        let err = plan(&s, &media(), &PlanOptions { joined: vec![audio_only], ..opts() }).unwrap_err();
+        assert!(err.to_string().contains("song.mp3"));
+    }
+
+    #[test]
+    fn joined_media_adds_up() {
+        let mut b = media();
+        b.duration = 100.0;
+        b.size_bytes = 1e8;
+        let whole = joined_media(&media(), &[b.clone(), b]);
+        assert_eq!(whole.duration, 800.0);
+        assert_eq!(whole.size_bytes, 1.2e9);
+        assert_eq!(whole.file_name, "movie.mkv + 2 more");
+        assert_eq!(whole.video.unwrap().width, 1920);
     }
 
     #[test]

@@ -17,4 +17,12 @@ parallelJobs: number, hardwareDecode: boolean,
 /**
  * Move the source to the Recycle Bin after a successful encode.
  */
-deleteOriginal: boolean, shutdownOnFinish: boolean, playSoundOnFinish: boolean, customSoundPath: string | null, defaultPresetId: string, };
+deleteOriginal: boolean, shutdownOnFinish: boolean, playSoundOnFinish: boolean, customSoundPath: string | null, defaultPresetId: string, 
+/**
+ * Use the graphics card for the simple choices when it can encode video.
+ */
+preferGpu: boolean, 
+/**
+ * Show the detailed controls instead of the three simple choices.
+ */
+advancedMode: boolean, };

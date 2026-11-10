@@ -64,7 +64,8 @@ pub fn encode_args(job: &ImageJob, quality: u32, output: &str, avif_fallback: bo
     // Outputs never carry metadata. `-map_metadata -1` drops container tags;
     // the side-data filter drops EXIF (camera, GPS), which ffmpeg would
     // otherwise copy into PNG files regardless.
-    a.extend(["-map_metadata".into(), "-1".into(), "-vf".into(), "sidedata=mode=delete".into()]);
+    let crop = job.crop.map(|c| format!("crop={}:{}:{}:{},", c.w, c.h, c.x, c.y)).unwrap_or_default();
+    a.extend(["-map_metadata".into(), "-1".into(), "-vf".into(), format!("{crop}sidedata=mode=delete")]);
     a.extend(["-frames:v".into(), "1".into()]);
     match job.format {
         ImageFormat::Webp => a.extend(["-c:v".into(), "libwebp".into(), "-quality".into(), quality.to_string()]),
@@ -203,45 +204,85 @@ pub async fn fit_to_size(
     Ok(TargetResult { bytes, quality, missed })
 }
 
-/// 4× upscale with Real-ESRGAN. Tries the GPU first, then the CPU.
-pub async fn upscale(tools: &Tools, job: &ImageJob, control: &JobControl, mut on_stage: impl FnMut(f64, &str)) -> Result<()> {
+/// 4× upscale with Real-ESRGAN on the graphics card.
+pub async fn upscale(tools: &Tools, job: &ImageJob, temp_dir: &Path, control: &JobControl, mut on_stage: impl FnMut(f64, &str)) -> Result<()> {
     let upscaler = tools
         .upscaler
         .as_ref()
         .ok_or_else(|| AppError::msg("The AI upscaler (Real-ESRGAN) is not installed with this copy of the app."))?;
     let info = probe_image(tools, &job.input).await?;
+    let (width, height) = job.crop.map(|c| (c.w, c.h)).unwrap_or((info.width, info.height));
+    let info = ImageInfo { width, height, ..info };
     let pixels = info.width as u64 * info.height as u64;
     if pixels > UPSCALE_PIXEL_LIMIT {
         return Err(AppError::msg(format!(
-            "This image is already {}×{} ({:.1} MP). Upscaling images of 4K or larger is not supported.",
+            "This image is already {}×{} ({:.1} MP). Enlarging images of 4K or larger is not supported.",
             info.width,
             info.height,
             pixels as f64 / 1e6
         )));
     }
+
+    // The upscaler only reads a few formats, so hand it a plain PNG whatever
+    // the original is (AVIF, TIFF, GIF, a WebP named .jpg, …).
+    on_stage(10.0, "Preparing the image");
+    std::fs::create_dir_all(temp_dir)?;
+    let prepared = temp_dir.join(format!("mvs_up_{}.png", uuid::Uuid::new_v4().simple()));
+    let crop = job.crop.map(|c| format!("crop={}:{}:{}:{},", c.w, c.h, c.x, c.y)).unwrap_or_default();
+    let filters = format!("{crop}sidedata=mode=delete");
+    let convert: Vec<String> = [
+        "-hide_banner", "-y", "-nostdin", "-loglevel", "error", "-i", job.input.as_str(),
+        "-map_metadata", "-1", "-vf", filters.as_str(), "-frames:v", "1", "-c:v", "png",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain(std::iter::once(prepared.to_string_lossy().into_owned()))
+    .collect();
+    let converted = capture(&tools.ffmpeg, &convert, None, Some(control)).await?;
+    if !converted.ok {
+        let _ = std::fs::remove_file(&prepared);
+        return Err(AppError::msg(format!("Could not read the image: {}", last_line(&converted.stderr))));
+    }
+
+    on_stage(25.0, "Enlarging on the graphics card");
     let models = upscaler.parent().map(|d| d.join("models")).unwrap_or_default();
-    let base: Vec<String> = vec![
-        "-i".into(), job.input.clone(),
+    let args: Vec<String> = vec![
+        "-i".into(), prepared.to_string_lossy().into_owned(),
         "-o".into(), job.output.clone(),
         "-n".into(), "realesrgan-x4plus".into(),
         "-s".into(), "4".into(),
         "-m".into(), models.to_string_lossy().into_owned(),
     ];
-
-    let mut last_error = String::new();
-    for (gpu, progress, label) in [("0", 20.0, "Upscaling on the GPU"), ("-1", 30.0, "GPU failed; upscaling on the CPU (slower)")] {
-        on_stage(progress, label);
-        let mut args = base.clone();
-        args.extend(["-g".into(), gpu.into()]);
-        let out = capture(upscaler, &args, None, Some(control)).await?;
-        let produced = std::fs::metadata(&job.output).map(|m| m.len() > 0).unwrap_or(false);
-        if out.ok && produced {
-            return Ok(());
-        }
-        last_error = last_line(&out.stderr);
-        let _ = std::fs::remove_file(&job.output);
+    let result = capture(upscaler, &args, None, Some(control)).await;
+    let _ = std::fs::remove_file(&prepared);
+    let out = result?;
+    let produced = std::fs::metadata(&job.output).map(|m| m.len() > 0).unwrap_or(false);
+    if out.ok && produced {
+        return Ok(());
     }
-    Err(AppError::msg(format!("AI upscaling failed on both the GPU and the CPU. {last_error}")))
+    let _ = std::fs::remove_file(&job.output);
+    Err(AppError::msg(upscale_failure(&out.stderr)))
+}
+
+/// Explain an upscaler failure in plain words.
+fn upscale_failure(stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("invalid gpu device") || lower.contains("no vulkan device") || !lower.contains("queuec=") {
+        "Enlarging needs a graphics card that supports Vulkan, and none was found. Updating the graphics driver usually fixes this.".into()
+    } else if lower.contains("vkallocatememory") || lower.contains("out of memory") {
+        "The graphics card ran out of memory while enlarging this image. Close other programs that use the graphics card and try again.".into()
+    } else if lower.contains("find_blob_index_by_name") || lower.contains("fopen") || lower.contains("open failed") {
+        "The AI model files are missing or damaged. Reinstalling the app restores them.".into()
+    } else {
+        // Skip the hardware listing and progress lines; keep what went wrong.
+        let detail = stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('[') && !l.ends_with('%'))
+            .last()
+            .unwrap_or("The upscaler stopped without saying why.");
+        format!("Enlarging failed: {detail}")
+    }
 }
 
 /// Process one image job start to finish.
@@ -285,7 +326,12 @@ async fn process(tools: &Tools, job: &ImageJob, temp_dir: &Path, control: &JobCo
             Ok((result.bytes, warning))
         }
         ImageAction::Upscale => {
-            upscale(tools, job, control, |p, label| progress(p, label)).await?;
+            upscale(tools, job, temp_dir, control, |p, label| progress(p, label)).await?;
+            let bytes = std::fs::metadata(&job.output).map(|m| m.len() as f64).unwrap_or(0.0);
+            Ok((bytes, None))
+        }
+        ImageAction::RemoveBackground => {
+            crate::background::remove_background(tools, job, temp_dir, control, |p, label| progress(p, label)).await?;
             let bytes = std::fs::metadata(&job.output).map(|m| m.len() as f64).unwrap_or(0.0);
             Ok((bytes, None))
         }
@@ -380,6 +426,7 @@ mod tests {
             output: "C:/out/photo.webp".into(),
             action: ImageAction::Compress { quality: 80 },
             format,
+            crop: None,
         }
     }
 
@@ -403,6 +450,24 @@ mod tests {
         assert_eq!(val(&encode_args(&job(ImageFormat::Jpg), 1, "o.jpg", false), "-q:v"), Some("31"));
         // Out-of-range quality is clamped.
         assert_eq!(val(&encode_args(&job(ImageFormat::Webp), 500, "o.webp", false), "-quality"), Some("100"));
+    }
+
+    #[test]
+    fn crop_comes_before_everything_else() {
+        let mut j = job(ImageFormat::Jpg);
+        j.crop = Some(Crop { w: 400, h: 300, x: 20, y: 10 });
+        let args = encode_args(&j, 90, "o.jpg", false);
+        assert_eq!(val(&args, "-vf"), Some("crop=400:300:20:10,sidedata=mode=delete"));
+    }
+
+    #[test]
+    fn upscale_failures_are_explained() {
+        let listing = "[0 NVIDIA GeForce RTX 3050]  queueC=2[8]  queueG=0[16]\n";
+        assert!(upscale_failure("invalid gpu device").contains("Vulkan"));
+        assert!(upscale_failure("").contains("Vulkan"));
+        assert!(upscale_failure(&format!("{listing}vkAllocateMemory failed -2")).contains("ran out of memory"));
+        assert!(upscale_failure(&format!("{listing}fopen C:/x/models/realesrgan-x4plus.param failed")).contains("model files"));
+        assert_eq!(upscale_failure(&format!("{listing}12.50%\ndecode image failed\n")), "Enlarging failed: decode image failed");
     }
 
     #[test]

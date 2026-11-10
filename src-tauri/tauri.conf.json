@@ -29,13 +29,17 @@
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "GhostofWeb",
     "shortDescription": "Video and image compression studio",
     "category": "Video",
@@ -49,13 +53,15 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../engine/realesrgan-ncnn-vulkan.exe": "engine/realesrgan-ncnn-vulkan.exe",
-      "../engine/vcomp140.dll": "engine/vcomp140.dll",
-      "../engine/models/realesrgan-x4plus.bin": "engine/models/realesrgan-x4plus.bin",
-      "../engine/models/realesrgan-x4plus.param": "engine/models/realesrgan-x4plus.param"
+      "../engine/*.exe": "engine/",
+      "../engine/*.dll": "engine/",
+      "../engine/*.txt": "engine/",
+      "../engine/models/*": "engine/models/"
     },
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico"
@@ -65,7 +71,9 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFNThGRjA3N0NDM0MyRjIKUldUeXdzTjhCLzlZcnRUcWovdkZMN2ZRTWQ1R3VnZXNId05taHZZYlhBazJVTlcwcTBCd2wybEoK",
-      "endpoints": ["https://github.com/ghostofweb/makevideosmall/releases/latest/download/latest.json"]
+      "endpoints": [
+        "https://github.com/ghostofweb/makevideosmall/releases/latest/download/latest.json"
+      ]
     }
   }
 }

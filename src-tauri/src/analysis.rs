@@ -203,14 +203,47 @@ pub fn estimate_by_maths(spec: &JobSpec, media: &MediaInfo) -> Option<Estimate> 
 }
 
 /// Where to take sample clips from: (start offset within the job, length).
+///
+/// The three samples have different lengths on purpose: comparing how long
+/// each took separates the fixed start-up cost of an encode from its speed.
 pub fn sample_windows(duration: f64) -> Vec<(f64, f64)> {
     if duration <= 0.0 {
         vec![(0.0, 1.0)]
     } else if duration < 12.0 {
         vec![(0.0, duration.min(4.0))]
     } else {
-        [0.2, 0.5, 0.8].iter().map(|f| (duration * f, 3.0)).collect()
+        vec![(duration * 0.2, 2.0), (duration * 0.5, 4.0), (duration * 0.8, 3.0)]
     }
+}
+
+/// Seconds a whole encode of `duration` will take, judged from timed samples
+/// given as (seconds of video, seconds it took).
+///
+/// Every sample pays a fixed start-up cost (starting ffmpeg, opening the
+/// encoder) that a full encode pays only once. With samples of different
+/// lengths a straight line through them gives both parts; otherwise a typical
+/// start-up cost is assumed.
+pub fn project_encode_time(samples: &[(f64, f64)], duration: f64) -> f64 {
+    let n = samples.len() as f64;
+    let total_secs: f64 = samples.iter().map(|s| s.0).sum();
+    let total_wall: f64 = samples.iter().map(|s| s.1).sum();
+    if samples.is_empty() || total_secs <= 0.0 {
+        return 1.0;
+    }
+    // Speed if there were no start-up cost at all: the slowest it can be.
+    let ceiling = total_wall / total_secs;
+    let mean_x = total_secs / n;
+    let mean_y = total_wall / n;
+    let spread: f64 = samples.iter().map(|s| (s.0 - mean_x).powi(2)).sum();
+    let per_second = if spread > 0.5 {
+        let slope = samples.iter().map(|s| (s.0 - mean_x) * (s.1 - mean_y)).sum::<f64>() / spread;
+        // Scenes differ, so keep the answer within what is physically plausible.
+        slope.clamp(ceiling * 0.1, ceiling)
+    } else {
+        ((total_wall - 0.5 * n).max(total_wall * 0.3)) / total_secs
+    };
+    let startup = (mean_y - per_second * mean_x).max(0.0);
+    (startup + per_second * duration).max(1.0)
 }
 
 struct Sample {
@@ -230,7 +263,7 @@ async fn encode_sample(
     control: Option<&JobControl>,
 ) -> Result<Sample> {
     let sample = sample_spec(spec, media, start, length, &out.to_string_lossy());
-    let opts = PlanOptions { hw_decode, pass_log: "mvs_sample".into() };
+    let opts = PlanOptions { hw_decode, pass_log: "mvs_sample".into(), joined: Vec::new() };
     let plan = plan(&sample, media, &opts)?;
     let args = plan.passes.last().cloned().unwrap_or_default();
     let started = Instant::now();
@@ -255,17 +288,14 @@ fn estimate_from_samples(spec: &JobSpec, media: &MediaInfo, samples: &[Sample]) 
     let duration = output_duration(spec, media);
     let secs: f64 = samples.iter().map(|s| s.secs).sum();
     let bytes: f64 = samples.iter().map(|s| s.bytes).sum();
-    let wall: f64 = samples.iter().map(|s| s.wall).sum();
-    // Every sample pays for process start-up and encoder initialisation once;
-    // a full encode pays it once in total.
-    let overhead = 0.35 * samples.len() as f64;
+    let timings: Vec<(f64, f64)> = samples.iter().map(|s| (s.secs, s.wall)).collect();
     let video_bytes = bytes / secs * duration;
     let audio_bytes = audio_kbps_total(spec, media) * 1000.0 / 8.0 * duration;
     let size_bytes = video_bytes + audio_bytes;
     Estimate {
         size_bytes,
         savings_percent: savings(size_bytes, source_bytes_for(spec, media)),
-        encode_secs: ((wall - overhead).max(wall * 0.3) / secs * duration).max(1.0),
+        encode_secs: project_encode_time(&timings, duration),
         video_kbps: bytes * 8.0 / secs / 1000.0,
         sampled: true,
     }
@@ -384,6 +414,194 @@ pub async fn render_preview(
     })
 }
 
+// ───────────────────────────── Simple choices ─────────────────────────────
+
+/// The `All:` score from ffmpeg's ssim filter (1.0 = identical).
+pub fn parse_ssim(stderr: &str) -> Option<f64> {
+    let line = stderr.lines().rev().find(|l| l.contains("SSIM") && l.contains("All:"))?;
+    let rest = &line[line.find("All:")? + 4..];
+    rest.split(|c: char| c.is_whitespace() || c == '(').next()?.parse().ok()
+}
+
+/// The pooled score from ffmpeg's libvmaf filter (0 – 100).
+pub fn parse_vmaf(stderr: &str) -> Option<f64> {
+    let line = stderr.lines().rev().find(|l| l.contains("VMAF score:"))?;
+    line.split("VMAF score:").nth(1)?.trim().split_whitespace().next()?.parse().ok()
+}
+
+/// Put an SSIM value on the same 0 – 1 scale as VMAF ÷ 100, for ffmpeg
+/// builds without libvmaf. Rough, but it keeps the wording consistent.
+pub fn ssim_to_score(ssim: f64) -> f64 {
+    const POINTS: [(f64, f64); 5] = [(0.80, 0.40), (0.92, 0.72), (0.95, 0.85), (0.975, 0.93), (1.0, 1.0)];
+    if ssim <= POINTS[0].0 {
+        return (ssim * 0.5).max(0.0);
+    }
+    for pair in POINTS.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if ssim <= x1 {
+            return y0 + (ssim - x0) / (x1 - x0) * (y1 - y0);
+        }
+    }
+    1.0
+}
+
+/// Scores at or above this look the same as the original to most people.
+const LOOKS_SAME: f64 = 0.93;
+/// Scores at or above this are very close; below it the loss starts to show.
+const LOOKS_CLOSE: f64 = 0.85;
+
+/// How a quality score (0 – 1) reads to a person.
+pub fn describe_look(score: f64) -> &'static str {
+    if score >= LOOKS_SAME {
+        "Looks the same as the original"
+    } else if score >= LOOKS_CLOSE {
+        "Very close to the original"
+    } else if score >= 0.72 {
+        "A little softer than the original"
+    } else {
+        "Visibly softer than the original"
+    }
+}
+
+/// Pick the choice to suggest. Each entry is (percent smaller, quality score),
+/// ordered from best quality to smallest file. Returns (index, reason).
+pub fn recommend(choices: &[(f64, f64)]) -> (usize, String) {
+    const WORTH_IT: f64 = 5.0;
+    const CLOSE: f64 = LOOKS_CLOSE;
+    if choices.is_empty() {
+        return (0, String::new());
+    }
+    let most_saved = choices.iter().map(|c| c.0).fold(f64::MIN, f64::max);
+    if most_saved < WORTH_IT {
+        // Nothing here makes a real difference: suggest the gentlest option.
+        return (
+            0,
+            "This video is already well compressed. Making it smaller will not save much space.".into(),
+        );
+    }
+    // The smallest file that still looks very close to the original.
+    if let Some(i) = (0..choices.len()).rev().find(|&i| choices[i].0 >= WORTH_IT && choices[i].1 >= CLOSE) {
+        let reason = if choices[i].1 >= LOOKS_SAME {
+            "Suggested: the smallest file that still looks the same as the original."
+        } else {
+            "Suggested: the smallest file that still looks very close to the original."
+        };
+        return (i, reason.into());
+    }
+    // Every option loses some detail: suggest the one that keeps the most.
+    let best = (0..choices.len())
+        .filter(|&i| choices[i].0 >= WORTH_IT)
+        .max_by(|&a, &b| choices[a].1.total_cmp(&choices[b].1))
+        .unwrap_or(0);
+    (best, "Suggested: this keeps the most detail. All three soften this video a little.".into())
+}
+
+/// How close `encoded` looks to `original`, 0 – 1.
+///
+/// Uses VMAF, a measure built to match what viewers notice. Falls back to
+/// SSIM when this ffmpeg was built without it.
+async fn measure_similarity(tools: &Tools, encoded: &Path, original: &Path, control: Option<&JobControl>) -> f64 {
+    let run = |metric: &str| {
+        let args: Vec<String> = [
+            "-hide_banner", "-nostdin", "-i", &encoded.to_string_lossy(), "-i", &original.to_string_lossy(),
+            "-lavfi", &format!("[0:v]setpts=PTS-STARTPTS[a];[1:v]setpts=PTS-STARTPTS[b];[a][b]{metric}"),
+            "-f", "null", "-",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        async move { capture(&tools.ffmpeg, &args, None, control).await }
+    };
+    if let Ok(out) = run("libvmaf=n_threads=8:n_subsample=3:shortest=1").await {
+        if let Some(score) = parse_vmaf(&out.stderr) {
+            return (score / 100.0).clamp(0.0, 1.0);
+        }
+    }
+    match run("ssim=shortest=1").await {
+        Ok(out) => parse_ssim(&out.stderr).map(ssim_to_score).unwrap_or(0.0),
+        Err(_) => 0.0,
+    }
+}
+
+/// What trying one choice on the video found.
+pub struct Tried {
+    pub estimate: Estimate,
+    pub preview: String,
+    pub similarity: f64,
+}
+
+/// Try several sets of settings on the same short samples of a video.
+///
+/// Returns the path of a reference clip (the original, same moment) and, for
+/// each spec, a size/time estimate, a playable preview and how close it looks.
+/// All specs must share the same picture geometry.
+pub async fn compare_choices(
+    tools: &Tools,
+    specs: &[JobSpec],
+    media: &MediaInfo,
+    temp_dir: &Path,
+    hw_decode: bool,
+    control: Option<&JobControl>,
+    mut on_progress: impl FnMut(f64, &str),
+) -> Result<(String, Vec<Tried>)> {
+    let Some(first) = specs.first() else {
+        return Err(AppError::msg("Nothing to compare."));
+    };
+    std::fs::create_dir_all(temp_dir)?;
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let job_start = effective_trim(first, media).map(|t| t.start).unwrap_or(0.0);
+    let windows = sample_windows(output_duration(first, media));
+    let shown = windows.len() / 2;
+    let steps = (specs.len() * windows.len() + 1) as f64;
+    let mut step = 0.0;
+
+    on_progress(2.0, "Reading the video");
+    let original = temp_dir.join(format!("mvs_easy_{id}_orig.mp4"));
+    let reference = reference_clip_args(first, media, job_start + windows[shown].0, windows[shown].1, &original.to_string_lossy());
+    let out = capture(&tools.ffmpeg, &reference, None, control).await?;
+    if !out.ok {
+        return Err(AppError::msg(format!("Could not read the video: {}", last_line(&out.stderr))));
+    }
+    step += 1.0;
+
+    let mut tried = Vec::new();
+    for (ci, spec) in specs.iter().enumerate() {
+        let mut samples = Vec::new();
+        let mut preview = String::new();
+        let mut similarity = 0.0;
+        for (wi, (start, length)) in windows.iter().enumerate() {
+            on_progress(step / steps * 100.0, &format!("Trying choice {} of {}", ci + 1, specs.len()));
+            let master = temp_dir.join(format!("mvs_easy_{id}_{ci}_{wi}.mkv"));
+            let sample = encode_sample(tools, spec, media, *start, *length, &master, hw_decode, control).await;
+            if wi == shown {
+                if let Ok(_) = &sample {
+                    let web = temp_dir.join(format!("mvs_easy_{id}_{ci}.mp4"));
+                    let converted = capture(
+                        &tools.ffmpeg,
+                        &web_playable_args(&master.to_string_lossy(), &web.to_string_lossy()),
+                        None,
+                        control,
+                    )
+                    .await;
+                    if matches!(&converted, Ok(c) if c.ok) {
+                        similarity = measure_similarity(tools, &web, &original, control).await;
+                        preview = web.to_string_lossy().into_owned();
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(&master);
+            samples.push(sample?);
+            step += 1.0;
+        }
+        if preview.is_empty() {
+            return Err(AppError::msg("Could not prepare the comparison clip."));
+        }
+        tried.push(Tried { estimate: estimate_from_samples(spec, media, &samples), preview, similarity });
+    }
+    on_progress(100.0, "Done");
+    Ok((original.to_string_lossy().into_owned(), tried))
+}
+
 /// Write one still frame (with crop/scale/rotate/filters applied) as a JPEG.
 pub async fn render_frame(
     tools: &Tools,
@@ -479,10 +697,93 @@ lavfi.bitplanenoise.0.5=0.500000
     }
 
     #[test]
+    fn reads_quality_scores() {
+        let log = "frame=   90 fps=0.0 q=-0.0\n[Parsed_ssim_2 @ 0000] SSIM Y:0.981234 (17.26) U:0.99 (20.1) V:0.99 (20.4) All:0.984567 (18.115)\n";
+        assert_eq!(parse_ssim(log), Some(0.984567));
+        assert_eq!(parse_ssim("nothing useful"), None);
+        assert_eq!(parse_vmaf("[Parsed_libvmaf_2 @ 000001] VMAF score: 89.966527\n"), Some(89.966527));
+        assert_eq!(parse_vmaf("no score here"), None);
+
+        assert_eq!(describe_look(0.96), "Looks the same as the original");
+        assert_eq!(describe_look(0.90), "Very close to the original");
+        assert_eq!(describe_look(0.76), "A little softer than the original");
+        assert_eq!(describe_look(0.56), "Visibly softer than the original");
+
+        // The SSIM fallback lands on the same wording at its own thresholds.
+        assert!((ssim_to_score(0.975) - 0.93).abs() < 1e-9);
+        assert!((ssim_to_score(0.95) - 0.85).abs() < 1e-9);
+        assert_eq!(ssim_to_score(1.0), 1.0);
+        assert!(ssim_to_score(0.5) < 0.4);
+        let mut last = 0.0;
+        for i in 0..=100 {
+            let v = ssim_to_score(i as f64 / 100.0);
+            assert!(v >= last && (0.0..=1.0).contains(&v), "must rise steadily: {i}");
+            last = v;
+        }
+    }
+
+    #[test]
+    fn recommends_the_smallest_choice_that_still_looks_right() {
+        // (percent smaller, quality score) from best quality to smallest.
+        // All three look fine: take the smallest.
+        assert_eq!(recommend(&[(40.0, 0.99), (70.0, 0.96), (88.0, 0.90)]).0, 2);
+        // The smallest is too soft: stop at balanced.
+        let (pick, why) = recommend(&[(40.0, 0.99), (70.0, 0.95), (88.0, 0.70)]);
+        assert_eq!(pick, 1);
+        assert!(why.contains("looks the same"));
+        // Only best quality holds up (real numbers from a detailed test clip).
+        let (pick, why) = recommend(&[(49.0, 0.90), (81.0, 0.76), (93.0, 0.56)]);
+        assert_eq!(pick, 0);
+        assert!(why.contains("very close"));
+        // Nothing holds up: the one that keeps the most detail.
+        let (pick, why) = recommend(&[(40.0, 0.80), (70.0, 0.70), (88.0, 0.55)]);
+        assert_eq!(pick, 0);
+        assert!(why.contains("soften"));
+        // An already-small video: say so instead of pretending.
+        let (pick, why) = recommend(&[(-20.0, 0.99), (-5.0, 0.99), (3.0, 0.97)]);
+        assert_eq!(pick, 0);
+        assert!(why.contains("already well compressed"));
+        // A choice that would make the file bigger is never the suggestion.
+        assert_eq!(recommend(&[(-30.0, 0.99), (20.0, 0.90), (60.0, 0.70)]).0, 1);
+        assert_eq!(recommend(&[]).0, 0);
+    }
+
+    #[test]
     fn sample_windows_fit_the_clip() {
-        assert_eq!(sample_windows(600.0), vec![(120.0, 3.0), (300.0, 3.0), (480.0, 3.0)]);
+        assert_eq!(sample_windows(600.0), vec![(120.0, 2.0), (300.0, 4.0), (480.0, 3.0)]);
+        // The longest sample is the middle one, which is the clip shown for comparison.
+        let w = sample_windows(600.0);
+        assert!(w[w.len() / 2].1 >= w[0].1 && w[w.len() / 2].1 >= w[2].1);
         assert_eq!(sample_windows(8.0), vec![(0.0, 4.0)]);
         assert_eq!(sample_windows(2.0), vec![(0.0, 2.0)]);
         assert_eq!(sample_windows(0.0), vec![(0.0, 1.0)]);
+    }
+
+    #[test]
+    fn encode_time_separates_startup_from_speed() {
+        // Measured on a graphics-card encoder: about 0.6 s to start, then 0.08 s per second.
+        let gpu = [(2.0, 0.76), (4.0, 0.92), (3.0, 0.84)];
+        let t = project_encode_time(&gpu, 600.0);
+        assert!((t - (0.6 + 0.08 * 600.0)).abs() < 1.0, "{t}");
+        // Naively scaling the samples would have said 168 s.
+        assert!(t < 60.0);
+        // A short clip costs little more than the start-up.
+        assert!(project_encode_time(&gpu, 12.0) < 2.0);
+
+        // A slow software encoder: start-up hardly matters.
+        let cpu = [(2.0, 5.2), (4.0, 10.1), (3.0, 7.7)];
+        let t = project_encode_time(&cpu, 600.0);
+        assert!((t - 1470.0).abs() < 60.0, "{t}");
+
+        // Noisy timings (a hard scene in the short sample) stay within bounds.
+        let odd = [(2.0, 3.0), (4.0, 2.0), (3.0, 2.5)];
+        let t = project_encode_time(&odd, 100.0);
+        let ceiling = 7.5 / 9.0 * 100.0;
+        assert!(t >= ceiling * 0.1 && t <= ceiling + 3.0, "{t}");
+
+        // One sample only: assume a typical start-up cost.
+        let t = project_encode_time(&[(4.0, 2.5)], 8.0);
+        assert!((t - 4.5).abs() < 0.6, "{t}");
+        assert_eq!(project_encode_time(&[], 10.0), 1.0);
     }
 }

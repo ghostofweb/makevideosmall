@@ -102,6 +102,26 @@ pub fn describe(enc: VideoEncoder, available: bool, reason: Option<String>) -> E
     }
 }
 
+/// How long one hardware check may take. A working encoder answers in under a
+/// second; a graphics driver that is busy can leave the check hanging.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
+const TIMED_OUT: &str = "The graphics driver did not answer in time.";
+
+/// The check for this encoder gave no answer, as opposed to a clear yes or no.
+pub fn timed_out(info: &EncoderInfo) -> bool {
+    info.reason.as_deref() == Some(TIMED_OUT)
+}
+
+/// Where a fresh check gave no answer for an encoder, keep what an earlier
+/// check found. A stalled driver says nothing about what the hardware can do.
+pub fn keep_known_answers(fresh: &mut Capabilities, earlier: &Capabilities) {
+    for info in fresh.encoders.iter_mut().filter(|e| timed_out(e)) {
+        if let Some(known) = earlier.encoders.iter().find(|e| e.id == info.id && !timed_out(e)) {
+            *info = known.clone();
+        }
+    }
+}
+
 /// Encode a few black frames to see whether a hardware encoder works here.
 async fn test_encode(tools: &Tools, enc: VideoEncoder) -> std::result::Result<(), String> {
     let pix = match enc.vendor() {
@@ -119,8 +139,8 @@ async fn test_encode(tools: &Tools, enc: VideoEncoder) -> std::result::Result<()
     .map(|s| s.to_string())
     .collect();
 
-    match tokio::time::timeout(Duration::from_secs(25), capture(&tools.ffmpeg, &args, None, None)).await {
-        Err(_) => Err("The test encode timed out.".into()),
+    match tokio::time::timeout(PROBE_TIMEOUT, capture(&tools.ffmpeg, &args, None, None)).await {
+        Err(_) => Err(TIMED_OUT.into()),
         Ok(Err(e)) => Err(e.to_string()),
         Ok(Ok(out)) if out.ok => Ok(()),
         Ok(Ok(out)) => Err(friendly_reason(enc, &out.stderr)),
@@ -198,7 +218,16 @@ pub async fn detect(tools: &Tools) -> Result<Capabilities> {
             }
         }
     });
-    let encoders = join_all(checks.collect()).await;
+    let mut encoders = join_all(checks.collect()).await;
+
+    // A check that hung is tried once more, alone: hangs come from several
+    // things asking the same graphics driver for a session at once.
+    for info in encoders.iter_mut().filter(|e| timed_out(e)) {
+        *info = match test_encode(tools, info.id).await {
+            Ok(()) => describe(info.id, true, None),
+            Err(reason) => describe(info.id, false, Some(reason)),
+        };
+    }
 
     Ok(Capabilities {
         ffmpeg_path: tools.ffmpeg.to_string_lossy().into_owned(),
@@ -206,6 +235,7 @@ pub async fn detect(tools: &Tools) -> Result<Capabilities> {
         ffmpeg_version: ffmpeg_version(tools).await,
         encoders,
         upscaler_available: tools.upscaler.is_some(),
+        background_removal_available: tools.bg_model.is_some(),
     })
 }
 
@@ -239,6 +269,38 @@ mod tests {
         assert_eq!(nv.quality_label, "CQ");
         assert!(!nv.supports_ten_bit);
         assert!(!nv.containers.contains(&Container::Webm));
+    }
+
+    #[test]
+    fn a_stalled_check_does_not_erase_what_was_known() {
+        let caps = |encoders: Vec<EncoderInfo>| Capabilities {
+            ffmpeg_path: String::new(),
+            ffprobe_path: String::new(),
+            ffmpeg_version: String::new(),
+            encoders,
+            upscaler_available: false,
+            background_removal_available: false,
+        };
+        let earlier = caps(vec![
+            describe(VideoEncoder::HevcAmf, true, None),
+            describe(VideoEncoder::Av1Amf, false, Some("This AMD GPU cannot encode this format.".into())),
+            describe(VideoEncoder::HevcNvenc, true, None),
+        ]);
+        let mut fresh = caps(vec![
+            describe(VideoEncoder::HevcAmf, false, Some(TIMED_OUT.into())),
+            describe(VideoEncoder::Av1Amf, false, Some(TIMED_OUT.into())),
+            // A clear "no" is believed, even if it used to be "yes".
+            describe(VideoEncoder::HevcNvenc, false, Some("No NVIDIA GPU (or driver) that supports this encoder was found.".into())),
+        ]);
+        keep_known_answers(&mut fresh, &earlier);
+        assert!(fresh.encoders[0].available, "the stalled check keeps the earlier yes");
+        assert_eq!(fresh.encoders[1].reason.as_deref(), Some("This AMD GPU cannot encode this format."));
+        assert!(!fresh.encoders[2].available);
+
+        // With nothing known before, the stall is reported as it is.
+        let mut alone = caps(vec![describe(VideoEncoder::HevcAmf, false, Some(TIMED_OUT.into()))]);
+        keep_known_answers(&mut alone, &caps(vec![]));
+        assert!(timed_out(&alone.encoders[0]));
     }
 
     #[test]

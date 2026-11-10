@@ -329,7 +329,57 @@ pub fn spec_for(media: &MediaInfo, settings: &EncodeSettings, output: String) ->
         subtitle_tracks,
         trim: None,
         auto_crop: None,
+        extra_inputs: Vec::new(),
     }
+}
+
+// ───────────────────────────── Simple choices ─────────────────────────────
+
+/// The three choices of the simple view, tuned for what this PC can do.
+///
+/// With a graphics card that can encode HEVC (and `prefer_gpu`), all three use
+/// it: far faster, slightly larger files. Otherwise they use the best software
+/// encoder this ffmpeg has.
+pub fn easy_options(caps: &Capabilities, prefer_gpu: bool) -> Vec<EasyOption> {
+    use VideoEncoder::*;
+    let has = |enc: VideoEncoder| caps.encoders.iter().any(|e| e.id == enc && e.available);
+    let gpu = [HevcNvenc, HevcAmf, HevcQsv].into_iter().find(|e| has(*e));
+    let cpu = [SvtAv1, X265, X264].into_iter().find(|e| has(*e)).unwrap_or(X264);
+    let encoder = match gpu {
+        Some(enc) if prefer_gpu => enc,
+        _ => cpu,
+    };
+    // (best, balanced, smallest) on each encoder's own quality scale.
+    let quality = match encoder {
+        HevcNvenc => [26, 34, 42],
+        HevcAmf | HevcQsv => [22, 28, 34],
+        SvtAv1 => [30, 40, 50],
+        X265 => [22, 27, 32],
+        _ => [20, 25, 30],
+    };
+    let speed = if encoder.is_hardware() {
+        [Speed::Slow, Speed::Medium, Speed::Medium]
+    } else {
+        [Speed::Slow, Speed::Medium, Speed::Fast]
+    };
+    let rows = [
+        ("best", "Best quality", "Keeps every detail. The biggest of the three."),
+        ("balanced", "Balanced", "Right for almost everything."),
+        ("smallest", "Smallest", "For sharing and chat apps. Can look a little softer."),
+    ];
+    rows.iter()
+        .enumerate()
+        .map(|(i, (id, title, hint))| EasyOption {
+            id: id.to_string(),
+            title: title.to_string(),
+            hint: hint.to_string(),
+            settings: settings(
+                Container::Mp4,
+                video(encoder, q(quality[i]), speed[i]),
+                if i == 2 { AAC_128 } else { AAC_160 },
+            ),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -375,6 +425,42 @@ mod tests {
             let plan = plan(&spec, &m, &PlanOptions::default())
                 .unwrap_or_else(|e| panic!("preset {} does not plan: {e}", p.id));
             assert!(!plan.passes.is_empty());
+        }
+    }
+
+    #[test]
+    fn easy_options_follow_the_hardware() {
+        use crate::ffmpeg::caps::describe;
+        let caps = |available: &[VideoEncoder]| Capabilities {
+            ffmpeg_path: String::new(),
+            ffprobe_path: String::new(),
+            ffmpeg_version: String::new(),
+            encoders: VideoEncoder::ALL.iter().map(|e| describe(*e, available.contains(e), None)).collect(),
+            upscaler_available: false,
+            background_removal_available: false,
+        };
+        let encoder = |c: &Capabilities, gpu: bool| easy_options(c, gpu)[1].settings.video.encoder;
+        let all = caps(&VideoEncoder::ALL);
+        assert_eq!(encoder(&all, true), VideoEncoder::HevcNvenc);
+        assert_eq!(encoder(&all, false), VideoEncoder::SvtAv1);
+        // No NVIDIA card: fall back to AMD, then to software.
+        assert_eq!(encoder(&caps(&[VideoEncoder::HevcAmf, VideoEncoder::X264]), true), VideoEncoder::HevcAmf);
+        assert_eq!(encoder(&caps(&[VideoEncoder::X265, VideoEncoder::X264]), true), VideoEncoder::X265);
+        assert_eq!(encoder(&caps(&[]), true), VideoEncoder::X264);
+
+        let options = easy_options(&all, true);
+        let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["best", "balanced", "smallest"]);
+        // Quality numbers rise (= smaller files) from best to smallest, and every option plans.
+        let q = |o: &EasyOption| match o.settings.video.rate {
+            RateControl::Quality { value } => value,
+            _ => panic!("simple choices are quality-based"),
+        };
+        assert!(q(&options[0]) < q(&options[1]) && q(&options[1]) < q(&options[2]));
+        let m = media();
+        for o in &options {
+            let spec = spec_for(&m, &o.settings, "C:/out/x.mp4".into());
+            plan(&spec, &m, &PlanOptions::default()).unwrap();
         }
     }
 

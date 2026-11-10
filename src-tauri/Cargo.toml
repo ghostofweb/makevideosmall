@@ -29,6 +29,7 @@ nvml-wrapper = "0.10"
 uuid = { version = "1", features = ["v4"] }
 trash = "5"
 parking_lot = "0.12"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-native", "api-31"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

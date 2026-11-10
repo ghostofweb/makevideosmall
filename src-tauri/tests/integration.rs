@@ -176,7 +176,7 @@ async fn encode(spec: &JobSpec) -> MediaInfo {
 async fn try_encode(spec: &JobSpec, hw_decode: bool) -> Result<MediaInfo, AppError> {
     let t = tools();
     let m = media(&spec.input).await;
-    let p = plan(spec, &m, &PlanOptions { hw_decode, pass_log: format!("pass_{}", uuid::Uuid::new_v4().simple()) })?;
+    let p = plan(spec, &m, &PlanOptions { hw_decode, pass_log: format!("pass_{}", uuid::Uuid::new_v4().simple()), joined: Vec::new() })?;
     let control = JobControl::new();
     for args in &p.passes {
         run_ffmpeg(&t.ffmpeg, args, Some(&temp()), None, &control, |_| {}, |_| {}).await?;
@@ -398,7 +398,7 @@ async fn gpu_decode_pipeline_when_nvenc_exists() {
     }
     let spec = job(&fixtures().main, VideoEncoder::HevcNvenc, Container::Mp4).await;
     let m = media(&spec.input).await;
-    assert!(plan(&spec, &m, &PlanOptions { hw_decode: true, pass_log: "x".into() }).unwrap().hwaccel);
+    assert!(plan(&spec, &m, &PlanOptions { hw_decode: true, pass_log: "x".into(), joined: Vec::new() }).unwrap().hwaccel);
     let result = try_encode(&spec, true).await.expect("full-GPU pipeline should encode");
     assert_eq!(result.video.unwrap().codec, "hevc");
 }
@@ -806,6 +806,7 @@ fn image_job(input: &str, action: ImageAction, format: ImageFormat) -> ImageJob 
         output: out(&format!("img.{}", format.ext())),
         action,
         format,
+        crop: None,
     }
 }
 
@@ -897,8 +898,202 @@ async fn images_upscale_four_times() {
     let j = image_job(&fixtures().small_photo, ImageAction::Upscale, ImageFormat::Png);
     let control = JobControl::new();
     let mut stages = Vec::new();
-    mvs_lib::image::upscale(&t, &j, &control, |_, s| stages.push(s.to_string())).await.unwrap();
+    mvs_lib::image::upscale(&t, &j, &temp(), &control, |_, s| stages.push(s.to_string())).await.unwrap();
     let info = probe_image(&t, &j.output).await.unwrap();
     println!("  upscaled 160x120 → {}x{} via: {}", info.width, info.height, stages.last().unwrap());
     assert_eq!((info.width, info.height), (640, 480));
+
+    // The app is handed its folders in Windows' long-path form; the upscaler
+    // must still find its model files (this is what broke "Enlarge" once).
+    let engine = t.upscaler.as_ref().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+    let long_form = std::path::PathBuf::from(format!(r"\\?\{}", engine.canonicalize().unwrap().display()).replace(r"\\?\\\?\", r"\\?\"));
+    let located = locate(&default_engine_dirs(Some(&long_form))).unwrap();
+    let found = located.upscaler.as_ref().unwrap().to_string_lossy().into_owned();
+    assert!(!found.starts_with(r"\\?\"), "{found}");
+    // And an AVIF source, which the upscaler cannot read by itself.
+    let avif = image_job(&fixtures().small_photo, ImageAction::Compress { quality: 90 }, ImageFormat::Avif);
+    fit_to_size(&located, &avif, 500, &temp(), &control, |_, _| {}).await.unwrap();
+    let from_avif = image_job(&avif.output, ImageAction::Upscale, ImageFormat::Png);
+    mvs_lib::image::upscale(&located, &from_avif, &temp(), &control, |_, _| {}).await.unwrap();
+    let info = probe_image(&located, &from_avif.output).await.unwrap();
+    assert_eq!((info.width, info.height), (640, 480));
+}
+
+// ───────────────────────────── Join, simple choices, crop, cut-outs ─────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn joins_videos_of_different_shapes_through_the_queue() {
+    let r = rig();
+    // 6 s 1280x720 with sound + 8 s 640x480 without sound + 4 s 720x576 interlaced without sound.
+    let first = media(&fixtures().main).await;
+    let mut spec = spec_for(&first, &base_settings(VideoEncoder::X264, Container::Mp4), out("joined.mp4"));
+    spec.audio_tracks.truncate(1);
+    spec.extra_inputs = vec![fixtures().letterbox.clone(), fixtures().interlaced.clone()];
+
+    let id = r.queue.add(vec![spec]).await.unwrap().remove(0);
+    let queued = job_of(&r, &id);
+    assert!(close(queued.source.duration, 18.0, 0.3), "the queue shows the total length: {}", queued.source.duration);
+    assert!(queued.source.file_name.ends_with("+ 2 more"), "{}", queued.source.file_name);
+
+    r.queue.start();
+    wait_for("the join to finish", Duration::from_secs(120), || {
+        matches!(status(&r, &id), JobStatus::Done | JobStatus::Failed)
+    })
+    .await;
+    let done = job_of(&r, &id);
+    assert_eq!(done.status, JobStatus::Done, "{:?}", done.error);
+
+    let result = media(&done.spec.output).await;
+    let v = result.video.as_ref().unwrap();
+    assert_eq!((v.width, v.height), (1280, 720), "every clip is fitted into the first clip's frame");
+    assert!(close(result.duration, 18.0, 0.5), "6 + 8 + 4 seconds: {}", result.duration);
+    assert_eq!(result.audio.len(), 1, "silent clips are padded with silence");
+    assert!(close(v.fps, 30.0, 0.1));
+    // The originals are untouched.
+    assert!(Path::new(&fixtures().letterbox).is_file() && Path::new(&fixtures().interlaced).is_file());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn simple_choices_are_measured_and_one_is_suggested() {
+    let t = tools();
+    let caps = capabilities().await;
+    let m = media(&fixtures().long).await;
+    for prefer_gpu in [true, false] {
+        let options = mvs_lib::presets::easy_options(&caps, prefer_gpu);
+        assert_eq!(options.len(), 3);
+        let specs: Vec<JobSpec> = options
+            .iter()
+            .map(|o| {
+                let mut s = spec_for(&m, &o.settings, out("easy.mp4"));
+                // Keep the processor path quick; quality settings are untouched.
+                s.settings.video.speed = Speed::Fastest;
+                s
+            })
+            .collect();
+        let mut stages = Vec::new();
+        let started = Instant::now();
+        let (original, tried) = analysis::compare_choices(&t, &specs, &m, &temp(), true, None, |p, s| stages.push((p, s.to_string())))
+            .await
+            .unwrap();
+        let took = started.elapsed().as_secs_f64();
+        assert_eq!(tried.len(), 3);
+        assert!(stages.len() >= 4 && stages.last().unwrap().0 == 100.0);
+
+        let reference = media(&original).await;
+        for (option, t3) in options.iter().zip(&tried) {
+            let clip = media(&t3.preview).await;
+            let v = clip.video.as_ref().unwrap();
+            assert_eq!((v.codec.as_str(), v.pix_fmt.as_str()), ("h264", "yuv420p"), "previews must play in the app");
+            assert_eq!((v.width, v.height), (1920, 1080));
+            assert!(close(clip.duration, reference.duration, 0.2));
+            assert!(t3.similarity > 0.2 && t3.similarity <= 1.0, "{}: quality score {}", option.id, t3.similarity);
+            assert!(t3.estimate.sampled && t3.estimate.size_bytes > 0.0 && t3.estimate.encode_secs > 0.0);
+        }
+        // Lower quality must never be estimated larger, or look closer to the original.
+        assert!(tried[0].estimate.size_bytes > tried[1].estimate.size_bytes && tried[1].estimate.size_bytes > tried[2].estimate.size_bytes);
+        assert!(tried[0].similarity >= tried[2].similarity);
+
+        let scores: Vec<(f64, f64)> = tried.iter().map(|x| (x.estimate.savings_percent, x.similarity)).collect();
+        let (pick, why) = analysis::recommend(&scores);
+        println!(
+            "  {} ({:?}): {} | suggested: {} — {why} [{took:.1}s]",
+            if prefer_gpu { "graphics card" } else { "processor" },
+            options[0].settings.video.encoder,
+            tried
+                .iter()
+                .zip(&options)
+                .map(|(x, o)| format!("{} {:.1} MB, {:.0}% smaller, {:.3} \"{}\"", o.id, x.estimate.size_bytes / 1048576.0, x.estimate.savings_percent, x.similarity, analysis::describe_look(x.similarity)))
+                .collect::<Vec<_>>()
+                .join(" | "),
+            options[pick].id
+        );
+        assert!(!why.is_empty());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn images_crop_keeps_the_chosen_part() {
+    let t = tools();
+    let control = JobControl::new();
+    for format in [ImageFormat::Jpg, ImageFormat::Png, ImageFormat::Webp] {
+        let mut j = image_job(&fixtures().photo, ImageAction::Compress { quality: 92 }, format);
+        j.crop = Some(Crop { w: 400, h: 300, x: 100, y: 50 });
+        fit_to_size(&t, &j, 100_000, &temp(), &control, |_, _| {}).await.unwrap();
+        let info = probe_image(&t, &j.output).await.unwrap();
+        assert_eq!((info.width, info.height), (400, 300), "{format:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn images_background_is_made_transparent() {
+    let t = tools();
+    if t.bg_model.is_none() {
+        println!("  skipped: the background-removal model is not in the engine folder");
+        return;
+    }
+    // A bright disc on a flat grey background: an unmistakable subject.
+    let subject = out("subject.png");
+    ffmpeg_blocking(&[
+        "-f", "lavfi", "-i", "color=c=0x808080:s=640x480",
+        "-vf", "geq=r='if(lte(hypot(X-320,Y-240),130),230,128)':g='if(lte(hypot(X-320,Y-240),130),60,128)':b='if(lte(hypot(X-320,Y-240),130),40,128)'",
+        "-frames:v", "1", &subject,
+    ]);
+    let j = image_job(&subject, ImageAction::RemoveBackground, ImageFormat::Png);
+    let control = JobControl::new();
+    let mut stages = Vec::new();
+    let started = Instant::now();
+    mvs_lib::background::remove_background(&t, &j, &temp(), &control, |_, s| stages.push(s.to_string())).await.unwrap();
+    println!("  background removed in {:.2}s ({})", started.elapsed().as_secs_f64(), stages.join(" → "));
+
+    let info = probe_image(&t, &j.output).await.unwrap();
+    assert_eq!((info.width, info.height), (640, 480));
+    // Read the transparency back: opaque in the middle of the disc, clear in the corners.
+    let alpha = out("alpha.raw");
+    ffmpeg_blocking(&["-i", &j.output, "-vf", "alphaextract", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", &alpha]);
+    let a = std::fs::read(&alpha).unwrap();
+    assert_eq!(a.len(), 640 * 480, "the result must have a transparency channel");
+    let at = |x: usize, y: usize| a[y * 640 + x];
+    assert!(at(320, 240) > 200, "the subject must stay solid (alpha {})", at(320, 240));
+    for (x, y) in [(8, 8), (630, 8), (8, 470), (630, 470)] {
+        assert!(at(x, y) < 40, "the background at ({x},{y}) must be see-through (alpha {})", at(x, y));
+    }
+    // Nothing temporary is left behind.
+    let leftovers = std::fs::read_dir(temp()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("mvs_bg_")).count();
+    assert_eq!(leftovers, 0);
+
+    // It also runs as part of a batch, next to other work.
+    let events = Arc::new(Collector::default());
+    let runner = ImageRunner::new(Some(tools()), temp(), events.clone(), tokio::runtime::Handle::current());
+    let batch = vec![
+        image_job(&subject, ImageAction::RemoveBackground, ImageFormat::Png),
+        image_job(&fixtures().small_photo, ImageAction::RemoveBackground, ImageFormat::Png),
+    ];
+    runner.start(batch.clone()).unwrap();
+    wait_for("cut-out batch to finish", Duration::from_secs(60), || events.count("image:batch-done") == 1).await;
+    for j in &batch {
+        assert!(Path::new(&j.output).is_file());
+    }
+}
+
+/// Diagnostic: run encoder detection many times and report anything slow.
+/// `cargo test --test integration detection_is_consistently_fast -- --ignored --nocapture`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn detection_is_consistently_fast() {
+    let t = tools();
+    let mut slowest = 0.0f64;
+    for round in 1..=15 {
+        let started = Instant::now();
+        let caps = caps::detect(&t).await.unwrap();
+        let took = started.elapsed().as_secs_f64();
+        slowest = slowest.max(took);
+        let odd: Vec<String> = caps
+            .encoders
+            .iter()
+            .filter(|e| e.reason.as_deref().map(|r| r.contains("timed out")).unwrap_or(false))
+            .map(|e| format!("{:?}", e.id))
+            .collect();
+        println!("  round {round:>2}: {took:>5.1}s  timed out: {odd:?}");
+    }
+    assert!(slowest < 8.0, "encoder detection took {slowest:.1}s in the worst round");
 }

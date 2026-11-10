@@ -1,0 +1,6 @@
+Bundled third-party software
+
+Real-ESRGAN ncnn Vulkan (realesrgan-ncnn-vulkan.exe, models/realesrgan-x4plus.*) - MIT - https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan
+U2-Net "silueta" model (models/silueta.onnx) - Apache-2.0 - via https://github.com/danielgatis/rembg
+ONNX Runtime - MIT - https://github.com/microsoft/onnxruntime
+ffmpeg / ffprobe (when present) - GPL - https://ffmpeg.org - see FFMPEG-LICENSE.txt

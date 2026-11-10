@@ -5,7 +5,7 @@
 
 use crate::analysis::detect_crop;
 use crate::error::{AppError, Result};
-use crate::ffmpeg::command::{plan, to_command_line, PlanOptions};
+use crate::ffmpeg::command::{joined_media, plan, to_command_line, PlanOptions};
 use crate::ffmpeg::locate::Tools;
 use crate::ffmpeg::probe;
 use crate::ffmpeg::progress::{eta, percent, Tick};
@@ -51,6 +51,15 @@ impl ProbeCache {
         self.entries.lock().insert(path.to_string(), (modified, size, info.clone()));
         Ok(info)
     }
+}
+
+/// Read the videos a job joins onto its first input.
+pub async fn probe_joined(tools: &Tools, probes: &ProbeCache, spec: &JobSpec) -> Result<Vec<MediaInfo>> {
+    let mut all = Vec::with_capacity(spec.extra_inputs.len());
+    for path in &spec.extra_inputs {
+        all.push(probes.get(tools, path).await?);
+    }
+    Ok(all)
 }
 
 struct State {
@@ -159,9 +168,11 @@ impl QueueManager {
         let tools = self.inner.tools.as_ref().ok_or(AppError::FfmpegMissing)?;
         let mut jobs = Vec::new();
         for spec in specs {
-            let media = self.inner.probes.get(tools, &spec.input).await?;
+            let first = self.inner.probes.get(tools, &spec.input).await?;
+            let joined = probe_joined(tools, &self.inner.probes, &spec).await?;
             // Validate now, so a bad job is rejected before it is queued.
-            plan(&spec, &media, &PlanOptions::default())?;
+            plan(&spec, &first, &PlanOptions { joined: joined.clone(), ..PlanOptions::default() })?;
+            let media = joined_media(&first, &joined);
             let v = media.video.as_ref();
             jobs.push(Job {
                 id: uuid::Uuid::new_v4().simple().to_string(),
@@ -490,9 +501,12 @@ impl Inner {
             (s.system_impact, s.hardware_decode)
         };
 
-        let media = self.probes.get(tools, &spec.input).await?;
+        let first = self.probes.get(tools, &spec.input).await?;
+        let joined = probe_joined(tools, &self.probes, &spec).await?;
+        // For a join, sizes and lengths below describe the whole result.
+        let media = joined_media(&first, &joined);
 
-        if spec.settings.video.crop == CropMode::Auto && spec.auto_crop.is_none() {
+        if spec.settings.video.crop == CropMode::Auto && spec.auto_crop.is_none() && joined.is_empty() {
             self.update(id, |j| j.stage = "Detecting black bars".into());
             self.changed();
             spec.auto_crop = detect_crop(tools, &media, Some(control)).await?;
@@ -511,8 +525,8 @@ impl Inner {
         std::fs::create_dir_all(&self.temp_dir)?;
 
         let pass_log = format!("mvs_pass_{id}");
-        let mut opts = PlanOptions { hw_decode, pass_log: pass_log.clone() };
-        let mut attempt = plan(&spec, &media, &opts)?;
+        let mut opts = PlanOptions { hw_decode, pass_log: pass_log.clone(), joined };
+        let mut attempt = plan(&spec, &first, &opts)?;
         for warning in &attempt.warnings {
             self.log(id, &format!("Note: {warning}"));
         }
@@ -554,7 +568,7 @@ impl Inner {
                     self.log(id, &format!("GPU decode failed ({}). Retrying with software decode.", reason.lines().last().unwrap_or("")));
                     let _ = std::fs::remove_file(&spec.output);
                     opts.hw_decode = false;
-                    attempt = plan(&spec, &media, &opts)?;
+                    attempt = plan(&spec, &first, &opts)?;
                 }
                 other => break other,
             }
@@ -616,7 +630,8 @@ impl Inner {
                             tally.done += 1;
                             tally.source_bytes += job.source.size_bytes;
                             tally.output_bytes += size;
-                            if delete_original {
+                            // Joined clips are left alone: they are not one "original".
+                            if delete_original && job.spec.extra_inputs.is_empty() {
                                 trash_source = Some(job.spec.input.clone());
                             }
                         }

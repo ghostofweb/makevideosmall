@@ -20,4 +20,8 @@ subtitleTracks: Array<SubtitleTrack>, trim: Trim | null,
 /**
  * Result of black-bar detection, used when `video.crop` is `Auto`.
  */
-autoCrop: Crop | null, };
+autoCrop: Crop | null, 
+/**
+ * More videos to join onto the end of `input`, in this order.
+ */
+extraInputs: Array<string>, };

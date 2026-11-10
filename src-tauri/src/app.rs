@@ -3,13 +3,13 @@
 use crate::analysis;
 use crate::error::{AppError, Result};
 use crate::ffmpeg::caps;
-use crate::ffmpeg::command::{plan, to_command_line, PlanOptions};
+use crate::ffmpeg::command::{joined_media, plan, to_command_line, PlanOptions};
 use crate::ffmpeg::locate::{default_engine_dirs, locate, Tools};
 use crate::ffmpeg::runner::JobControl;
 use crate::image::{probe_image, ImageRunner};
 use crate::model::*;
-use crate::presets::{output_path_for, spec_for, PresetStore};
-use crate::queue::{ProbeCache, QueueManager};
+use crate::presets::{easy_options, output_path_for, spec_for, PresetStore};
+use crate::queue::{probe_joined, ProbeCache, QueueManager};
 use crate::system::spawn_monitor;
 use crate::util::{emit, load_json, save_json, EventSink};
 use parking_lot::{Mutex, RwLock};
@@ -37,7 +37,12 @@ impl EventSink for TauriSink {
 
 pub struct AppState {
     tools: Option<Tools>,
-    caps: tokio::sync::OnceCell<Capabilities>,
+    /// What this PC can encode with. Remembered between launches so start-up
+    /// never waits on graphics drivers; refreshed quietly in the background.
+    caps: RwLock<Option<Capabilities>>,
+    /// Only one hardware check runs at a time.
+    detecting: tokio::sync::Mutex<()>,
+    caps_path: PathBuf,
     probes: Arc<ProbeCache>,
     queue: QueueManager,
     presets: PresetStore,
@@ -62,10 +67,57 @@ impl AppState {
 
     async fn capabilities(&self) -> Result<Capabilities> {
         let tools = self.tools()?;
-        self.caps
-            .get_or_try_init(|| caps::detect(tools))
-            .await
-            .cloned()
+        if let Some(known) = self.caps.read().clone() {
+            return Ok(known);
+        }
+        let _one_at_a_time = self.detecting.lock().await;
+        if let Some(known) = self.caps.read().clone() {
+            return Ok(known);
+        }
+        // An answer from an earlier launch is good as long as ffmpeg is the same.
+        let remembered: Option<RememberedCaps> = load_json(&self.caps_path);
+        let found = match remembered.filter(|r| r.key == caps_key(tools)) {
+            Some(r) => Capabilities {
+                // What is bundled can change between versions; never trust the file for it.
+                upscaler_available: tools.upscaler.is_some(),
+                background_removal_available: tools.bg_model.is_some(),
+                ..r.capabilities
+            },
+            None => {
+                let fresh = caps::detect(tools).await?;
+                self.remember(tools, &fresh);
+                fresh
+            }
+        };
+        *self.caps.write() = Some(found.clone());
+        Ok(found)
+    }
+
+    fn remember(&self, tools: &Tools, capabilities: &Capabilities) {
+        // A check that got no answer is not worth remembering: ask again next time.
+        if capabilities.encoders.iter().any(caps::timed_out) {
+            let _ = std::fs::remove_file(&self.caps_path);
+            return;
+        }
+        let _ = save_json(&self.caps_path, &RememberedCaps { key: caps_key(tools), capabilities: capabilities.clone() });
+    }
+
+    /// Check the hardware again and tell the UI if anything changed (a new
+    /// graphics card or driver since the answer was remembered).
+    async fn refresh_capabilities(&self) {
+        let Ok(tools) = self.tools() else { return };
+        let _one_at_a_time = self.detecting.lock().await;
+        let Ok(mut fresh) = caps::detect(tools).await else { return };
+        let earlier = self.caps.read().clone();
+        if let Some(earlier) = &earlier {
+            caps::keep_known_answers(&mut fresh, earlier);
+        }
+        self.remember(tools, &fresh);
+        if earlier.as_ref() != Some(&fresh) {
+            *self.caps.write() = Some(fresh.clone());
+            let prefer_gpu = self.settings.read().prefer_gpu;
+            emit(&*self.sink, "caps:changed", &CapsChanged { easy_options: easy_options(&fresh, prefer_gpu), capabilities: fresh });
+        }
     }
 
     fn begin(&self, token: &str) -> Arc<JobControl> {
@@ -96,6 +148,37 @@ impl AppState {
     }
 }
 
+/// Identifies the ffmpeg a remembered hardware check belongs to.
+fn caps_key(tools: &Tools) -> String {
+    let (size, modified) = std::fs::metadata(&tools.ffmpeg)
+        .map(|m| {
+            let modified = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            (m.len(), modified)
+        })
+        .unwrap_or((0, 0));
+    format!("{}|{size}|{modified}", tools.ffmpeg.display())
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct RememberedCaps {
+    key: String,
+    capabilities: Capabilities,
+}
+
+/// Sent when a background hardware check finds something different.
+#[derive(Serialize, Clone, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CapsChanged {
+    pub capabilities: Capabilities,
+    pub easy_options: Vec<EasyOption>,
+}
+
 // ───────────────────────────── Bootstrap ─────────────────────────────
 
 #[derive(Serialize, Clone, TS)]
@@ -108,6 +191,8 @@ pub struct Bootstrap {
     pub problem: Option<String>,
     pub settings: AppSettings,
     pub presets: Vec<Preset>,
+    /// The three choices of the simple view, for this PC.
+    pub easy_options: Vec<EasyOption>,
     pub queue: QueueSnapshot,
     /// Files passed on the command line ("Open with").
     pub startup_files: Vec<String>,
@@ -134,8 +219,10 @@ async fn bootstrap(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<
         let _ = save_json(&state.settings_path, &*settings);
     }
 
+    let prefer_gpu = state.settings.read().prefer_gpu;
     Ok(Bootstrap {
         version: app.package_info().version.to_string(),
+        easy_options: capabilities.as_ref().map(|c| easy_options(c, prefer_gpu)).unwrap_or_default(),
         capabilities,
         problem,
         settings: state.settings.read().clone(),
@@ -231,9 +318,11 @@ pub struct CommandPreview {
 /// The exact ffmpeg command a job would run, plus any warnings about it.
 #[tauri::command]
 async fn command_preview(state: State<'_, AppState>, spec: JobSpec) -> Result<CommandPreview> {
-    let media = state.probes.get(state.tools()?, &spec.input).await?;
+    let tools = state.tools()?;
+    let media = state.probes.get(tools, &spec.input).await?;
+    let joined = probe_joined(tools, &state.probes, &spec).await?;
     let hw_decode = state.settings.read().hardware_decode;
-    let p = plan(&spec, &media, &PlanOptions { hw_decode, ..PlanOptions::default() })?;
+    let p = plan(&spec, &media, &PlanOptions { hw_decode, joined, ..PlanOptions::default() })?;
     Ok(CommandPreview {
         command: to_command_line("ffmpeg", p.passes.last().unwrap()),
         warnings: p.warnings,
@@ -243,6 +332,124 @@ async fn command_preview(state: State<'_, AppState>, spec: JobSpec) -> Result<Co
         video_kbps: p.video_kbps,
         passes: p.passes.len() as u32,
     })
+}
+
+// ───────────────────────────── Simple view ─────────────────────────────
+
+/// The three simple choices for this PC (they depend on the "use the graphics card" setting).
+#[tauri::command]
+async fn easy_options_list(state: State<'_, AppState>) -> Result<Vec<EasyOption>> {
+    let caps = state.capabilities().await?;
+    Ok(easy_options(&caps, state.settings.read().prefer_gpu))
+}
+
+/// Check a video and try the three simple choices on it.
+///
+/// `base` carries what belongs to the file rather than to a choice: its trim
+/// and the audio/subtitle selection are kept; the output folder comes from it.
+#[tauri::command]
+async fn easy_analyze(state: State<'_, AppState>, base: JobSpec, token: String) -> Result<EasyAnalysis> {
+    let tools = state.tools()?;
+    let media = state.probes.get(tools, &base.input).await?;
+    let caps = state.capabilities().await?;
+    let (prefer_gpu, hw_decode) = {
+        let s = state.settings.read();
+        (s.prefer_gpu, s.hardware_decode)
+    };
+    let options = easy_options(&caps, prefer_gpu);
+    let control = state.begin(&token);
+    let mut progress = state.progress(&token);
+
+    let result: Result<EasyAnalysis> = async {
+        progress(1.0, "Looking for black bars");
+        let found = analysis::analyze_source(tools, &media, Some(&control)).await?;
+        let specs: Vec<JobSpec> = options
+            .iter()
+            .map(|o| {
+                let mut spec = spec_for(&media, &o.settings, base.output.clone());
+                spec.trim = base.trim;
+                // Black bars are wasted space: crop them whenever they are found.
+                if found.crop.is_some() {
+                    spec.settings.video.crop = CropMode::Auto;
+                    spec.auto_crop = found.crop;
+                }
+                spec
+            })
+            .collect();
+        let (original, tried) = analysis::compare_choices(
+            tools, &specs, &media, &state.temp_dir, hw_decode, Some(&control),
+            |p, stage| progress(5.0 + p * 0.95, stage),
+        )
+        .await?;
+        let scores: Vec<(f64, f64)> = tried.iter().map(|t| (t.estimate.savings_percent, t.similarity)).collect();
+        let (pick, advice) = analysis::recommend(&scores);
+        let choices: Vec<EasyChoice> = options
+            .iter()
+            .zip(specs)
+            .zip(tried)
+            .map(|((option, spec), t)| EasyChoice {
+                id: option.id.clone(),
+                spec,
+                look: analysis::describe_look(t.similarity).to_string(),
+                estimate: t.estimate,
+                preview: t.preview,
+                similarity: t.similarity,
+            })
+            .collect();
+        Ok(EasyAnalysis {
+            analysis: found,
+            original,
+            recommended: choices.get(pick).map(|c| c.id.clone()).unwrap_or_default(),
+            choices,
+            advice,
+        })
+    }
+    .await;
+    drop(progress);
+    state.end(&token, &control);
+    result
+}
+
+/// Prepare several videos to be joined, in the order given.
+#[tauri::command]
+async fn join_spec(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    settings: EncodeSettings,
+    also_taken: Vec<String>,
+) -> Result<Joined> {
+    let tools = state.tools()?;
+    let Some((first_path, rest_paths)) = paths.split_first() else {
+        return Err(AppError::msg("Pick at least two videos to join."));
+    };
+    if rest_paths.is_empty() {
+        return Err(AppError::msg("Pick at least two videos to join."));
+    }
+    let first = state.probes.get(tools, first_path).await?;
+    let mut rest = Vec::new();
+    for path in rest_paths {
+        rest.push(state.probes.get(tools, path).await?);
+    }
+    let mut naming = state.settings.read().clone();
+    naming.output_suffix = "_joined".into();
+    let output = output_path_for(first_path, settings.container, &naming, &taken(&state, also_taken));
+    let mut spec = spec_for(&first, &settings, output);
+    spec.extra_inputs = rest_paths.to_vec();
+    spec.audio_tracks.truncate(1);
+    spec.subtitle_tracks.clear();
+    spec.settings.subtitles = SubtitleDefault::None;
+    // Fail now, with a clear reason, rather than when the queue reaches it.
+    plan(&spec, &first, &PlanOptions { joined: rest.clone(), ..PlanOptions::default() })?;
+    Ok(Joined { spec, media: joined_media(&first, &rest) })
+}
+
+/// Describe an existing join (used when the list is restored at launch).
+#[tauri::command]
+async fn join_info(state: State<'_, AppState>, spec: JobSpec) -> Result<MediaInfo> {
+    let tools = state.tools()?;
+    let first = state.probes.get(tools, &spec.input).await?;
+    let rest = probe_joined(tools, &state.probes, &spec).await?;
+    Ok(joined_media(&first, &rest))
 }
 
 // ───────────────────────────── Presets ─────────────────────────────
@@ -577,7 +784,9 @@ fn build_state(app: &tauri::AppHandle) -> AppState {
         images: ImageRunner::new(tools.clone(), temp_dir.clone(), sink.clone(), runtime),
         presets: PresetStore::new(Some(data.join("presets.json"))),
         tools,
-        caps: tokio::sync::OnceCell::new(),
+        caps: RwLock::new(None),
+        detecting: tokio::sync::Mutex::new(()),
+        caps_path: data.join("capabilities.json"),
         probes,
         settings,
         settings_path,
@@ -600,6 +809,13 @@ pub fn run() {
             let state = build_state(app.handle());
             spawn_monitor(state.sink.clone());
             app.manage(state);
+            // Once the window has settled, check the hardware again in the
+            // background. Start-up itself uses the remembered answer.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+                handle.state::<AppState>().refresh_capabilities().await;
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -621,6 +837,10 @@ pub fn run() {
             make_spec,
             output_for,
             command_preview,
+            easy_options_list,
+            easy_analyze,
+            join_spec,
+            join_info,
             presets_list,
             preset_save,
             preset_delete,
