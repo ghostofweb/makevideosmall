@@ -17,8 +17,8 @@
 
     /* Linting */
     "strict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
@@ -30,5 +30,5 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/electron"]
+  "exclude": ["src/**/*.test.ts"]
 }

@@ -1,0 +1,71 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Make Video Small",
+  "version": "3.0.0",
+  "identifier": "com.ghostofweb.makevideosmall",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5123",
+    "beforeDevCommand": "npm run dev:ui",
+    "beforeBuildCommand": "npm run build:ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Make Video Small",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1120,
+        "minHeight": 700,
+        "center": true,
+        "decorations": false,
+        "visible": false,
+        "dragDropEnabled": true,
+        "backgroundColor": "#0c0c0e"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "GhostofWeb",
+    "shortDescription": "Video and image compression studio",
+    "category": "Video",
+    "licenseFile": "../license.txt",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../engine/realesrgan-ncnn-vulkan.exe": "engine/realesrgan-ncnn-vulkan.exe",
+      "../engine/vcomp140.dll": "engine/vcomp140.dll",
+      "../engine/models/realesrgan-x4plus.bin": "engine/models/realesrgan-x4plus.bin",
+      "../engine/models/realesrgan-x4plus.param": "engine/models/realesrgan-x4plus.param"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFNThGRjA3N0NDM0MyRjIKUldUeXdzTjhCLzlZcnRUcWovdkZMN2ZRTWQ1R3VnZXNId05taHZZYlhBazJVTlcwcTBCd2wybEoK",
+      "endpoints": ["https://github.com/ghostofweb/makevideosmall/releases/latest/download/latest.json"]
+    }
+  }
+}

@@ -27,3 +27,13 @@ ffmpeg.exe
 ffplay.exe
 ffprobe.exe
 engine/*.pth
+# Tauri / Rust
+src-tauri/target
+src-tauri/gen
+# Bundled ffmpeg (fetched with npm run fetch-ffmpeg)
+engine/ffmpeg.exe
+engine/ffprobe.exe
+engine/av*.dll
+engine/sw*.dll
+engine/postproc*.dll
+engine/FFMPEG-LICENSE.txt
