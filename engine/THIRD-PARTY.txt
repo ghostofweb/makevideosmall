@@ -1,6 +1,22 @@
 Bundled third-party software
 
-Real-ESRGAN ncnn Vulkan (realesrgan-ncnn-vulkan.exe, models/realesrgan-x4plus.*) - MIT - https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan
-U2-Net "silueta" model (models/silueta.onnx) - Apache-2.0 - via https://github.com/danielgatis/rembg
-ONNX Runtime - MIT - https://github.com/microsoft/onnxruntime
-ffmpeg / ffprobe (when present) - GPL - https://ffmpeg.org - see FFMPEG-LICENSE.txt
+ffmpeg and ffprobe (ffmpeg.exe, ffprobe.exe)
+  Version 8.1.1, "full" static build from https://www.gyan.dev/ffmpeg/builds/
+  Licence: GNU GPL version 3 (see FFMPEG-LICENSE.txt, when present)
+  Source: https://ffmpeg.org/download.html (release 8.1.1); the build's
+  configuration and the sources of its libraries are listed at
+  https://www.gyan.dev/ffmpeg/builds/
+  Make Video Small runs these as separate programs and does not link to them.
+
+Real-ESRGAN ncnn Vulkan (realesrgan-ncnn-vulkan.exe, models/realesrgan-x4plus.*)
+  Licence: MIT - https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan
+
+U2-Net "silueta" model (models/silueta.onnx)
+  Licence: MIT (code), Apache-2.0 (weights) - via https://github.com/danielgatis/rembg
+
+ONNX Runtime
+  Licence: MIT - https://github.com/microsoft/onnxruntime
+
+Slint
+  Used under the Slint Royalty-free Desktop, Mobile, and Web Applications
+  Licence - https://slint.dev

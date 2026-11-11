@@ -1,119 +1,128 @@
 # Make Video Small
 
-A Windows app that makes videos and pictures smaller. Add a file, and the app tries three sizes on it, shows what each one looks like next to the original, and suggests one. Everything runs on your own PC; nothing is uploaded.
+Make your videos and pictures smaller, on your own PC.
+
+Add a video and the app tries three sizes on it. You see how big each one will be, how it will look next to the original, and which one it suggests. Pick one and you're done. Nothing is uploaded, there is no account, and it is free.
 
 ![Make Video Small](./screenshot.png)
 
+## Download
+
+**[Download the latest version for Windows](https://github.com/ghostofweb/makevideosmall/releases/latest)**: get `MakeVideoSmall-3.0.0-setup.exe` and run it.
+
+- Windows 10 or 11, 64-bit.
+- It installs for you only and does not ask for an administrator password.
+- Everything it needs is inside, including ffmpeg. Nothing else to install.
+
+Windows may show "Windows protected your PC" the first time, because the app is new and not signed by a company. Click **More info**, then **Run anyway**.
+
 ## What it does
 
-**Videos**
+### Videos
 
-- **Three choices, measured on your video.** Best quality, Balanced and Smallest each show the size the file will become, how much smaller that is, how it will look and how long it takes. One is marked as suggested.
-- **See it before you commit.** A frame of the original and the same frame at the chosen size sit side by side, with a divider you can drag.
-- **Cut the start or end** to keep only part of a video.
-- **Join several videos into one.** Tick them in the order they should play.
-- **Black bars are removed automatically** when a video has them.
-- **A queue** that works through your files one after another. You can reorder, pause, resume and cancel, and it is remembered if the app closes.
-- **Uses your graphics card when it can** (NVIDIA, AMD or Intel), which is several times faster. One setting switches to the smallest possible files instead.
-- **Advanced controls** behind one switch: exact encoder (H.264, HEVC, AV1), quality, bitrate or target file size, two-pass, resolution, frame rate, crop, 10-bit, HDR, each audio and subtitle track, filters, and your own saved presets.
+- **Three sizes, measured on your video.** Best quality, Balanced and Smallest each show the size your file will become, how much smaller that is, how it will look, and how long it takes. One is marked as suggested.
+- **See before you choose.** A frame of your video and the same frame at the chosen size sit side by side. Drag the line between them to compare.
+- **Cut** the start or end off a video.
+- **Join** several videos into one. Tick them in the order they should play.
+- **Black bars are removed** by themselves when a video has them.
+- **A queue.** Add a whole folder and leave it. Pause, reorder or cancel whenever you like. It is remembered if you close the app, and it can turn the PC off when it is done.
+- **Fast on a graphics card.** NVIDIA, AMD and Intel graphics are used when your PC has them. One setting switches to the processor instead, for the smallest possible files.
+- **Every control, if you want it.** Turn on **Advanced** to choose the exact format, quality, file size, resolution, sound tracks, subtitles and filters yourself, and save your own presets.
 
-**Pictures**
+### Pictures
 
-- **Make smaller** as WebP, JPEG, AVIF or PNG.
-- **Fit a size limit**, for upload forms that reject large files.
-- **Crop** by dragging a box, free or to a fixed shape.
-- **Remove the background** so only the subject is left.
-- **Make bigger** four times with AI (needs a graphics card).
+- **Make smaller**, as WebP, JPEG, AVIF or PNG.
+- **Fit a size**, for upload forms that reject big files.
+- **Crop**, free or to a fixed shape.
+- **Remove the background**, keeping only the person or object.
+- **Make bigger**, four times, with AI filling in the detail (needs a graphics card).
 
-Originals are never changed or overwritten. Camera details and GPS location are never copied into picture results.
+Your originals are never changed. Camera details and GPS location are never copied into the results.
 
-## Install
+## How to use it
 
-1. Open the [Releases page](https://github.com/ghostofweb/makevideosmall/releases).
-2. Download the latest `MakeVideoSmall-x.y.z-setup.exe`.
-3. Run it. It installs for you only and does not ask for an administrator.
+1. **Add a video.** Drag it onto the window, or click **Add videos**. The app tries the three sizes on short pieces of it; this takes about a minute.
+2. **Pick a size.** Look at the numbers and the picture, and click the one you want. The suggested one is a good choice if you are not sure.
+3. **Add it to the queue** and click **Start**. The smaller copy appears next to the original, with `_small` at the end of its name.
 
-Windows 10 or 11, 64-bit. To update, download and run the newer installer; your settings, presets and queue are kept.
+For pictures, switch to **Pictures** at the top, add them, pick a tool on the right, and click the big button.
 
-## How it is built
+## Questions
 
-The whole app is Rust. There is no web view and no JavaScript.
+**Is it really free?**
+Yes. It is open source under the MIT licence. No account, no trial, no paid version, and nothing that reports back.
 
-| Part | What |
-|---|---|
-| Window | [Slint](https://slint.dev), drawn by its software renderer (`app/`) |
-| Engine | A plain Rust library (`core/`): reading files, building ffmpeg commands, the queue, presets, analysis, picture tools |
-| Media engine | [ffmpeg](https://ffmpeg.org) and ffprobe, run as separate programs |
-| AI | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) for enlarging; a U²-Net model through ONNX Runtime for background removal |
+**Does anything get uploaded?**
+No. Everything happens on your PC. It works with the internet switched off.
 
-The engine owns everything that matters (the queue, presets, settings) and knows nothing about how the window is drawn. The window shows what the engine reports and passes on what people ask for.
+**Will my video look worse?**
+That depends on the size you pick, and you see it before you start. Each choice tells you in plain words how close it is to the original.
 
-```
-app/                 the window
-  ui/                what it looks like (.slint): theme, video, queue, pictures, main window
-  src/
-    main.rs          start-up, drag and drop, closing
-    video.rs         the list of videos and the editor (simple and advanced)
-    queue_ui.rs      the queue pane and what happens when it finishes
-    pictures.rs      the picture tools
-    settings_ui.rs   the Settings sheet
-    fmt.rs           words, numbers and crop-box maths (unit-tested)
-core/                the engine
-  src/
-    service.rs       the front door: one method per thing a person can ask for
-    ffmpeg/          locate, probe, capabilities, command builder, progress parser, process runner
-    queue.rs         ordering, pause/resume/cancel, persistence
-    analysis.rs      black bars, noise, size estimates, the three choices and the suggestion
-    image.rs         compress, fit a size, crop, enlarge
-    background.rs    background removal
-    presets.rs       built-in and saved presets, the simple choices
-  tests/             runs real encodes through ffmpeg and checks the results
-engine/              bundled tools and AI models
-installer/           the Windows installer script (NSIS)
-scripts/             fetch ffmpeg, build the installer
-```
+**Where do the finished files go?**
+Next to the original by default. In **Settings** you can choose one folder for everything, or change what is added to the name.
 
-### Why Slint
+**Is there a Mac or Linux version?**
+Not yet.
 
-Earlier versions drew the window with a web view (first Electron, then Tauri with WebView2). A web view costs several hundred megabytes of memory before the app does anything. Measured on the same PC, with the same engine underneath:
+**I had version 2. What changed?**
+Version 3 was rewritten from scratch. It opens in a fraction of a second, uses a ninth of the memory, and adds cutting, joining, cropping and background removal. You can remove version 2 from **Settings > Apps > Installed apps**.
 
-| | Electron (v2) | Tauri + WebView2 | Slint (now) |
-|---|---|---|---|
-| Memory with an empty window | 460–500 MB | about 480 MB | 53 MB |
-| Memory with three videos loaded and one checked | | | 71 MB |
-| Start to window | 2.8–3.9 s | 1.3–1.9 s | 0.1–0.35 s |
-| Installer (without ffmpeg) | 166 MB | 63 MB | 66 MB |
+## Rewritten in Rust
 
-Most of the installer is the two AI models, which is why it did not shrink further. The time to check a video is set by ffmpeg, not by the window, so that did not change either.
+Version 2 was built with Electron and Python: a web browser and a Python runtime inside the app. Version 3 is one Rust program, with its window drawn by [Slint](https://slint.dev). Measured on the same laptop:
 
-## Development
+| | Version 2 | Version 3 |
+|---|---|---|
+| Memory with an empty window | about 480 MB | 53 MB |
+| Time to open | 2.8 – 3.9 s | 0.12 – 0.35 s |
 
-You need [Rust](https://rustup.rs) and the Microsoft C++ Build Tools ("Desktop development with C++"), and ffmpeg.
+Rust runs everything you click on and wait for: reading your files, working out the right settings, the queue, pausing and cancelling. The encoding itself is done by [ffmpeg](https://ffmpeg.org), which is the best tool there is for that job.
+
+## For developers
+
+You need [Rust](https://rustup.rs) and the Microsoft C++ Build Tools ("Desktop development with C++"), and ffmpeg on your `PATH` or in `engine\`.
 
 ```powershell
 git clone https://github.com/ghostofweb/makevideosmall.git
 cd makevideosmall
-powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1   # downloads ffmpeg + ffprobe into engine\ (not stored in git)
 cargo run -p make-video-small
 ```
-
-If you skip the fetch script, the app uses an ffmpeg found on your `PATH`.
 
 | Command | What it does |
 |---|---|
 | `cargo run -p make-video-small` | Run the app |
 | `cargo test --workspace` | Unit tests, plus tests that run real encodes through ffmpeg and check the results |
-| `cargo build --release -p make-video-small` | The optimised program (`target\release\make-video-small.exe`) |
+| `cargo build --release -p make-video-small` | The optimised program, in `target\release\` |
 | `powershell -ExecutionPolicy Bypass -File scripts\package.ps1` | Build, then make the installer in `dist\` |
+| `powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1` | Put ffmpeg in `engine\` so the installer includes it |
 
-The real-encode tests are timing-sensitive (pause, cancel, restart). Run them on an otherwise idle PC.
+The real-encode tests pause, cancel and restart encodes against the clock, so run them on an otherwise idle PC. Making the installer needs [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`); without it the script makes a zip instead.
 
-`scripts\package.ps1` needs [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`) to make an installer; without it, it makes a zip of the program folder instead. The installer carries whatever is in `engine\`, so run the fetch script first if it should include its own ffmpeg.
+```
+app/        the window: Slint interface (ui/) and the Rust behind it (src/)
+core/       the engine: ffmpeg commands, queue, presets, analysis, picture tools
+            core/src/service.rs is the front door; core/tests/ runs real encodes
+engine/     bundled tools and AI models
+installer/  the Windows installer script
+scripts/    fetch ffmpeg, build the installer
+```
 
-### Checking the built program
+The engine knows nothing about the window, and the window knows nothing about ffmpeg. Every ffmpeg command comes from one pure function, `plan()` in `core/src/ffmpeg/command.rs`, which is tested without running ffmpeg.
 
-The program can press its own buttons, for checks that need the real window. Set `MVS_AUTO` to a list of steps and `MVS_SNAPSHOT` to a file for pictures of the window; the steps are listed in `app/src/main.rs`. `MVS_DATA_DIR` points the app at a different settings folder so that a check never touches your own queue.
+The built program can drive itself for automated checks: set `MVS_AUTO` to a list of steps and `MVS_SNAPSHOT` to a file for pictures of the window (the steps are listed in `app/src/main.rs`). `MVS_DATA_DIR` points it at a different settings folder so a check never touches your own queue.
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licences
 
-The app's own code is under the licence in `license.txt`. It bundles and runs third-party software under their own licences: ffmpeg (GPL build), Real-ESRGAN ncnn Vulkan (MIT), ONNX Runtime (MIT), the U²-Net model from [rembg](https://github.com/danielgatis/rembg) (MIT; model weights Apache-2.0) and Slint (used under its royalty-free licence for desktop apps; see [slint.dev](https://slint.dev)).
+Make Video Small is under the MIT licence (`license.txt`). It includes other software under its own licence:
+
+- [ffmpeg](https://ffmpeg.org), GPL v3 build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
+- [Real-ESRGAN ncnn Vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan), MIT
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime), MIT
+- the U²-Net model from [rembg](https://github.com/danielgatis/rembg), MIT, weights Apache-2.0
+- [Slint](https://slint.dev), under its royalty-free licence for desktop apps
+
+The full list ships with the app in `engine\THIRD-PARTY.txt`.
+
+Made by [Sahiljeet Singh Kalsi](https://ghostofweb.vercel.app/).

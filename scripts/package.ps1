@@ -29,7 +29,11 @@ if (-not (Test-Path $exe)) { throw "Not found: $exe" }
 # Stage the files exactly as they are installed.
 $stage = "$root\dist\Make Video Small"
 New-Item -ItemType Directory -Force "$stage\engine" | Out-Null
-Copy-Item $exe "$stage\make-video-small.exe" -Force
+# Skip the program if it has not changed: the staged copy may be running.
+$staged = "$stage\make-video-small.exe"
+if (-not (Test-Path $staged) -or (Get-FileHash $exe).Hash -ne (Get-FileHash $staged).Hash) {
+    Copy-Item $exe $staged -Force
+}
 # /MIR keeps the staged engine folder identical to engine\ (minus notes for developers).
 robocopy "$root\engine" "$stage\engine" /MIR /XF README.md *.pth /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw 'Copying the engine folder failed.' }
