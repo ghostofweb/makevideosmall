@@ -1,0 +1,1387 @@
+// The video screen: the list of videos and the editor for the selected one.
+
+import { ListView, ScrollView, ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme, Btn, Seg, Toggle, Check, Slide, Field, PaneTitle, Hairline, Empty, Meter, Compare, Working } from "theme.slint";
+
+export struct VideoRow {
+    name: string,
+    detail: string,
+    thumb: image,
+    has-thumb: bool,
+    ticked: bool,
+    // Position in the join order, 0 when not shown.
+    order: int,
+    // Estimated result ÷ original, negative when unknown.
+    ratio: float,
+}
+
+export struct Choice {
+    title: string,
+    hint: string,
+    size: string,
+    saving: string,
+    look: string,
+    time: string,
+    measured: bool,
+    suggested: bool,
+    bigger: bool,
+}
+
+export struct AudioRow {
+    title: string,
+    detail: string,
+    keep: bool,
+    codec: int,
+    kbps: int,
+    mix: int,
+}
+
+export struct SubRow {
+    title: string,
+    detail: string,
+    // 0 leave out, 1 keep as a track, 2 burn into the picture
+    mode: int,
+    shown-by-default: bool,
+}
+
+export global V {
+    // ── The list
+    in property <[VideoRow]> videos;
+    in property <int> selected: -1;
+    in property <int> ticked-count;
+    in property <string> count-text;
+    in property <bool> loading;
+    in property <bool> can-add: true;
+    in property <[string]> option-titles;
+    // The simple choice every targeted video shares, or -1.
+    in property <int> shared-choice: -1;
+    in property <bool> advanced;
+    in property <string> queue-all-text: "Add to queue";
+    callback add-files();
+    callback add-folder();
+    callback select(int);
+    callback tick(int);
+    callback remove(int);
+    callback join();
+    callback bulk-choice(int);
+    callback bulk-preset(int);
+    callback queue-all();
+
+    // ── The selected video
+    in property <bool> has-source;
+    in property <string> heading;
+    in property <string> advice;
+    in property <string> error;
+    in property <string> info;
+    in property <string> save-as;
+    in property <bool> joined;
+    in property <string> joined-list;
+    in property <[Choice]> choices;
+    in property <int> chosen: -1;
+    in property <bool> checking;
+    in property <float> check-progress;
+    in property <string> check-stage;
+    in property <image> frame;
+    in property <bool> has-frame;
+    in property <image> left;
+    in property <image> right;
+    in property <bool> has-compare;
+    in property <string> right-caption;
+    callback choose(int);
+    callback add-to-queue();
+    callback change-output();
+    callback recheck();
+
+    // ── Cutting
+    in property <float> length-secs;
+    in property <float> position;
+    in property <float> trim-from;
+    in property <float> trim-to;
+    in property <bool> has-trim;
+    in property <string> position-text;
+    in property <string> keeping-text;
+    in-out property <string> start-text;
+    in-out property <string> end-text;
+    callback seek(float);
+    callback cut-start();
+    callback cut-end();
+    callback cut-clear();
+    callback cut-type(string, string);
+
+    // ── Advanced controls. Every control calls set(name, value).
+    callback put(string, float);
+    callback put-text(string, string);
+    in property <[string]> presets;
+    in-out property <int> preset: -1;
+    in property <bool> preset-is-mine;
+    callback pick-preset(int);
+    callback save-preset();
+    callback delete-preset();
+    callback import-presets();
+    callback export-presets();
+
+    in property <[string]> encoders;
+    in-out property <int> encoder;
+    in property <string> encoder-hint;
+    in property <bool> is-copy;
+    in property <int> rate-mode;
+    in property <float> quality;
+    in property <string> quality-hint;
+    in-out property <string> kbps-text;
+    in property <string> kbps-hint;
+    in-out property <string> size-text;
+    in property <bool> two-pass;
+    in property <bool> two-pass-allowed;
+    in property <int> speed;
+    in property <[string]> resolutions;
+    in-out property <int> resolution;
+    in property <bool> custom-size;
+    in-out property <string> width-text;
+    in-out property <string> height-text;
+    in property <[string]> rates;
+    in-out property <int> rate;
+    in property <int> crop-mode;
+    in property <string> crop-hint;
+    in-out property <string> crop-w;
+    in-out property <string> crop-h;
+    in-out property <string> crop-x;
+    in-out property <string> crop-y;
+    in property <int> depth;
+    in property <bool> ten-allowed;
+    in property <bool> is-hdr;
+    in property <int> hdr;
+    in property <bool> grain-allowed;
+    in property <float> grain;
+    in property <[string]> containers;
+    in property <int> container;
+    in property <bool> keep-chapters;
+    in property <bool> keep-metadata;
+    in property <string> chapters-hint;
+    in property <int> deinterlace;
+    in property <string> deinterlace-hint;
+    in property <int> denoise;
+    in property <int> sharpen;
+    in property <int> rotate;
+    in property <bool> flip-h;
+    in property <bool> flip-v;
+
+    in property <[AudioRow]> audio;
+    in property <string> audio-tab: "Audio";
+    callback audio-put(int, string, float);
+    in property <[SubRow]> subs;
+    in property <string> subs-tab: "Subtitles";
+    callback sub-put(int, string, float);
+
+    // ── Advanced summary
+    in property <float> estimate-ratio: -1;
+    in property <string> estimate-text;
+    in property <bool> estimating;
+    in property <string> warnings;
+    in property <string> plan-error;
+    in property <string> command;
+    in property <string> source-text;
+    in property <bool> analyzing;
+    in property <string> finding-bars;
+    in property <bool> can-crop-bars;
+    in property <string> finding-noise;
+    in property <string> noise-action;
+    in property <bool> finding-interlaced;
+    in property <bool> comparing;
+    in property <float> compare-progress;
+    in property <string> compare-stage;
+    callback estimate();
+    callback cancel-estimate();
+    callback analyze();
+    callback apply-crop();
+    callback apply-noise();
+    callback apply-deinterlace();
+    callback compare();
+    callback close-compare();
+    callback copy-command();
+}
+
+// ───────────────────────────── The list ─────────────────────────────
+
+export component SourcesPane inherits Rectangle {
+    width: 280px;
+    horizontal-stretch: 0;
+    background: Theme.panel;
+
+    VerticalLayout {
+        PaneTitle {
+            text: "Videos";
+            note: V.count-text;
+            Btn {
+                text: "Add videos";
+                height: 28px;
+                enabled: V.can-add;
+                clicked => { V.add-files(); }
+            }
+            Btn {
+                text: "Folder";
+                height: 28px;
+                enabled: V.can-add;
+                clicked => { V.add-folder(); }
+            }
+        }
+
+        if V.videos.length == 0: Empty {
+            title: V.loading ? "Reading your videos…" : "Drop videos here";
+            body: V.loading ? "" : "Drag videos or folders onto the window, or pick them yourself.";
+            if !V.loading: Btn {
+                text: "Add videos";
+                kind: 1;
+                enabled: V.can-add;
+                clicked => { V.add-files(); }
+            }
+        }
+
+        if V.videos.length > 0: ListView {
+            vertical-stretch: 1;
+            for v[i] in V.videos: Rectangle {
+                height: 66px;
+                background: i == V.selected ? #2a3041cc : (row-touch.has-hover ? #2a304166 : transparent);
+                accessible-role: list-item;
+                accessible-label: v.name;
+                accessible-item-selected: i == V.selected;
+                accessible-action-default => { V.select(i); }
+                row-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { V.select(i); }
+                }
+                if i == V.selected: Rectangle {
+                    x: 0;
+                    width: 2px;
+                    background: Theme.primary;
+                }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 4px;
+                    padding-top: 9px;
+                    padding-bottom: 9px;
+                    spacing: 9px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            on: v.ticked;
+                            name: "Tick " + v.name;
+                            toggled => { V.tick(i); }
+                        }
+                    }
+                    Rectangle {
+                        width: 72px;
+                        border-radius: 3px;
+                        background: Theme.stage;
+                        clip: true;
+                        if v.has-thumb: Image {
+                            width: 100%;
+                            height: 100%;
+                            source: v.thumb;
+                            image-fit: cover;
+                        }
+                        if v.order > 0: Rectangle {
+                            x: 2px;
+                            y: 2px;
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 8px;
+                            background: Theme.primary;
+                            Text {
+                                text: v.order;
+                                color: Theme.on-primary;
+                                font-size: 10px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: v.name;
+                            color: Theme.fg;
+                            font-weight: 500;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: v.detail;
+                            color: Theme.muted;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
+                        Meter { ratio: v.ratio; }
+                    }
+                    Rectangle {
+                        width: 20px;
+                        accessible-role: button;
+                        accessible-label: "Remove " + v.name;
+                        accessible-action-default => { V.remove(i); }
+                        Text {
+                            text: "✕";
+                            color: remove-touch.has-hover ? Theme.fg : Theme.faint;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        remove-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { V.remove(i); }
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+            }
+        }
+
+        if V.videos.length > 1: VerticalLayout {
+            vertical-stretch: 0;
+            Hairline { }
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                if V.ticked-count >= 2: Btn {
+                    text: "Join these " + V.ticked-count + " into one video";
+                    clicked => { V.join(); }
+                }
+                if V.ticked-count >= 2: Text {
+                    text: "They play in the order you ticked them (see the numbers).";
+                    color: Theme.muted;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                if V.ticked-count < 2 && V.videos.length >= 2: Text {
+                    text: "Tick two or more videos to join them into one.";
+                    color: Theme.muted;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                if !V.advanced && V.videos.length > 1: Text {
+                    text: V.ticked-count > 0 ? "Use for the ticked videos" : "Use for all videos";
+                    color: Theme.muted;
+                    font-size: 12px;
+                }
+                if !V.advanced && V.videos.length > 1: Seg {
+                    name: "For several videos";
+                    options: V.option-titles;
+                    current: V.shared-choice;
+                    picked(i) => { V.bulk-choice(i); }
+                }
+                if V.advanced: ComboBox {
+                    model: V.presets;
+                    current-index: -1;
+                    accessible-label: "Apply a preset to several videos";
+                    selected => { V.bulk-preset(self.current-index); }
+                }
+                Btn {
+                    text: V.queue-all-text;
+                    kind: 1;
+                    height: 36px;
+                    clicked => { V.queue-all(); }
+                }
+            }
+        }
+    }
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: Theme.border;
+    }
+}
+
+// ───────────────────────────── Preview and cutting ─────────────────────────────
+
+component Stage inherits Rectangle {
+    in property <bool> show-compare;
+    in property <bool> busy;
+    in property <string> busy-text;
+    in property <float> busy-progress;
+    background: Theme.stage;
+    clip: true;
+    if root.show-compare: Compare {
+        width: root.width;
+        height: root.height;
+        left: V.left;
+        right: V.right;
+        right-caption: V.right-caption;
+    }
+    if !root.show-compare && V.has-frame: Image {
+        width: root.width;
+        height: root.height;
+        source: V.frame;
+        image-fit: contain;
+    }
+    if root.busy: Working {
+        text: root.busy-text;
+        progress: root.busy-progress;
+    }
+}
+
+// The scrubber with start and end markers.
+component CutBar inherits VerticalLayout {
+    in property <bool> show-done;
+    callback done;
+    spacing: 8px;
+    Slide {
+        name: "Position in the video";
+        minimum: 0;
+        maximum: max(V.length-secs, 0.1);
+        value: V.position;
+        mark-from: V.length-secs > 0 ? V.trim-from / V.length-secs : 0;
+        mark-to: V.has-trim && V.length-secs > 0 ? V.trim-to / V.length-secs : 0;
+        moved-to(v) => { V.seek(v); }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        height: 28px;
+        Text {
+            text: V.position-text;
+            color: Theme.fg;
+            width: 62px;
+            vertical-alignment: center;
+        }
+        if !V.joined: Btn {
+            text: "Start here";
+            height: 28px;
+            clicked => { V.cut-start(); }
+        }
+        if !V.joined: LineEdit {
+            width: 78px;
+            height: 28px;
+            text <=> V.start-text;
+            accessible-label: "Start";
+            accepted => { V.cut-type("start", self.text); }
+        }
+        if !V.joined: Btn {
+            text: "End here";
+            height: 28px;
+            clicked => { V.cut-end(); }
+        }
+        if !V.joined: LineEdit {
+            width: 78px;
+            height: 28px;
+            text <=> V.end-text;
+            accessible-label: "End";
+            accepted => { V.cut-type("end", self.text); }
+        }
+        if V.has-trim: Btn {
+            text: "Keep the whole video";
+            kind: 2;
+            height: 28px;
+            clicked => { V.cut-clear(); }
+        }
+        Text {
+            text: V.keeping-text;
+            color: V.has-trim ? Theme.primary : Theme.muted;
+            font-size: 12px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.show-done: Btn {
+            text: "Done";
+            kind: 1;
+            height: 28px;
+            clicked => { root.done(); }
+        }
+    }
+}
+
+// ───────────────────────────── The simple editor ─────────────────────────────
+
+component ChoiceCard inherits Rectangle {
+    in property <Choice> data;
+    in property <bool> selected;
+    in property <bool> checking;
+    callback picked;
+
+    min-width: 130px;
+    horizontal-stretch: 1;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: root.selected ? Theme.primary : (touch.has-hover ? Theme.faint : Theme.border);
+    background: root.selected ? Theme.tint : Theme.panel;
+    accessible-role: button;
+    accessible-label: "Choice: " + root.data.title;
+    accessible-description: root.data.measured ? root.data.size + ", " + root.data.saving + ", " + root.data.look : root.data.hint;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.picked(); }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.data.title;
+                color: Theme.fg;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.data.suggested: Rectangle {
+                width: badge.preferred-width + 12px;
+                height: 18px;
+                border-radius: 4px;
+                background: Theme.primary;
+                badge := Text {
+                    text: "Suggested";
+                    color: Theme.on-primary;
+                    font-size: 11px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border-width: 2px;
+                border-color: root.selected ? Theme.primary : Theme.faint;
+                background: root.selected ? Theme.primary : transparent;
+                if root.selected: Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.on-primary;
+                }
+            }
+        }
+        if root.data.measured: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: root.data.size;
+                color: Theme.fg;
+                font-size: 22px;
+                font-weight: 500;
+            }
+            Text {
+                text: root.data.saving;
+                color: root.data.bigger ? Theme.bad : Theme.saved;
+                font-weight: 500;
+                vertical-alignment: bottom;
+            }
+        }
+        if root.data.measured: Text {
+            text: root.data.look;
+            color: Theme.fg;
+            wrap: word-wrap;
+        }
+        if root.data.measured: Text {
+            text: root.data.time;
+            color: Theme.muted;
+            font-size: 12px;
+        }
+        if !root.data.measured: Text {
+            text: root.data.hint;
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if !root.data.measured && root.checking: Text {
+            text: "Working out the size…";
+            color: Theme.faint;
+            font-size: 12px;
+        }
+    }
+}
+
+component EasyEditor inherits VerticalLayout {
+    property <bool> cutting;
+    Stage {
+        vertical-stretch: 1;
+        min-height: 180px;
+        show-compare: V.has-compare && !root.cutting;
+        busy: V.checking && !root.cutting;
+        busy-text: V.check-stage;
+        busy-progress: V.check-progress;
+    }
+    Hairline { }
+    Rectangle {
+        vertical-stretch: 0;
+        background: Theme.panel;
+        VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 9px;
+            padding-bottom: 9px;
+            if root.cutting: CutBar {
+                show-done: true;
+                done => { root.cutting = false; }
+            }
+            if !root.cutting: HorizontalLayout {
+                height: 32px;
+                spacing: 10px;
+                if !V.joined: Btn {
+                    text: V.has-trim ? "Change the cut" : "Cut the start or end";
+                    clicked => { root.cutting = true; }
+                }
+                if V.has-trim: Text {
+                    text: V.keeping-text;
+                    color: Theme.primary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+                if V.has-trim: Btn {
+                    text: "Keep the whole video";
+                    kind: 2;
+                    clicked => { V.cut-clear(); }
+                }
+                Text {
+                    text: V.info;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+    Hairline { }
+    VerticalLayout {
+        vertical-stretch: 0;
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-top: 14px;
+        padding-bottom: 16px;
+        spacing: 6px;
+        Text {
+            text: V.heading;
+            color: Theme.fg;
+            font-size: 17px;
+            font-weight: 600;
+        }
+        if V.joined: Text {
+            text: V.joined-list;
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if V.advice != "": Text {
+            text: V.advice;
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if V.error != "": HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: V.error;
+                color: Theme.bad;
+                wrap: word-wrap;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Btn {
+                text: "Try again";
+                clicked => { V.recheck(); }
+            }
+        }
+        Rectangle { height: 2px; }
+        HorizontalLayout {
+            height: 138px;
+            spacing: 12px;
+            for c[i] in V.choices: ChoiceCard {
+                data: c;
+                selected: i == V.chosen;
+                checking: V.checking;
+                picked => { V.choose(i); }
+            }
+        }
+        if V.chosen < 0: Text {
+            text: "This video uses settings you chose yourself in the advanced view. Pick a card to go back to a simple choice.";
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        Rectangle { height: 4px; }
+        HorizontalLayout {
+            height: 40px;
+            spacing: 10px;
+            Text {
+                text: V.save-as;
+                color: Theme.muted;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Btn {
+                text: "Change…";
+                kind: 2;
+                height: 40px;
+                clicked => { V.change-output(); }
+            }
+            Btn {
+                text: "Add to queue";
+                kind: 1;
+                text-size: 15px;
+                height: 40px;
+                min-width: 150px;
+                clicked => { V.add-to-queue(); }
+            }
+        }
+    }
+}
+
+// ───────────────────────────── The advanced editor ─────────────────────────────
+
+component Num inherits LineEdit {
+    in property <string> key;
+    width: 84px;
+    height: 30px;
+    input-type: decimal;
+    accepted => { V.put-text(root.key, self.text); }
+    changed has-focus => {
+        if (!self.has-focus) { V.put-text(root.key, self.text); }
+    }
+}
+
+component Note inherits Text {
+    color: Theme.muted;
+    vertical-alignment: center;
+}
+
+component SummaryTab inherits VerticalLayout {
+    spacing: 4px;
+    Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.border;
+        background: Theme.panel;
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+            Meter {
+                height: 10px;
+                ratio: V.estimate-ratio;
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                if !V.estimating: Btn {
+                    text: V.estimate-ratio >= 0 ? "Estimate again" : "Estimate size and time";
+                    enabled: V.plan-error == "" && !V.joined;
+                    clicked => { V.estimate(); }
+                }
+                if V.estimating: Btn {
+                    text: "Cancel";
+                    clicked => { V.cancel-estimate(); }
+                }
+                Text {
+                    text: V.estimating ? "Encoding short samples to measure the result…" : V.estimate-text;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+    if V.plan-error != "": Text {
+        text: V.plan-error;
+        color: Theme.bad;
+        wrap: word-wrap;
+    }
+    if V.warnings != "": Text {
+        text: V.warnings;
+        color: Theme.primary;
+        wrap: word-wrap;
+    }
+    Field {
+        label: "Save as";
+        Text {
+            text: V.save-as;
+            color: Theme.fg;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Btn {
+            text: "Change…";
+            clicked => { V.change-output(); }
+        }
+    }
+    Field {
+        label: "File type";
+        Seg {
+            name: "File type";
+            options: V.containers;
+            current: V.container;
+            picked(i) => { V.put("container", i); }
+        }
+    }
+    Field {
+        label: "Source";
+        Text {
+            text: V.source-text;
+            color: Theme.fg;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+    Field {
+        label: "Check the video";
+        hint: "Looks for black bars, noise and interlacing so the right fixes can be suggested.";
+        Btn {
+            text: V.analyzing ? "Checking…" : "Check for black bars and noise";
+            enabled: !V.analyzing && !V.joined;
+            clicked => { V.analyze(); }
+        }
+    }
+    if V.finding-bars != "": Field {
+        label: "";
+        Note { text: V.finding-bars; color: Theme.fg; }
+        if V.can-crop-bars: Btn {
+            text: "Crop them off";
+            height: 26px;
+            clicked => { V.apply-crop(); }
+        }
+    }
+    if V.finding-noise != "": Field {
+        label: "";
+        Note { text: V.finding-noise; color: Theme.fg; }
+        if V.noise-action != "": Btn {
+            text: V.noise-action;
+            height: 26px;
+            clicked => { V.apply-noise(); }
+        }
+    }
+    if V.finding-interlaced: Field {
+        label: "";
+        Note { text: "This video is interlaced."; color: Theme.fg; }
+        if V.deinterlace == 0: Btn {
+            text: "Deinterlace it";
+            height: 26px;
+            clicked => { V.apply-deinterlace(); }
+        }
+    }
+    Field {
+        label: "ffmpeg command";
+        Btn {
+            text: "Copy what will run";
+            enabled: V.command != "";
+            clicked => { V.copy-command(); }
+        }
+    }
+    if V.command != "": Text {
+        text: V.command;
+        color: Theme.muted;
+        font-size: 11px;
+        wrap: char-wrap;
+    }
+}
+
+component VideoTab inherits VerticalLayout {
+    Field {
+        label: "Encoder";
+        hint: V.encoder-hint;
+        ComboBox {
+            width: 300px;
+            model: V.encoders;
+            current-index <=> V.encoder;
+            accessible-label: "Encoder";
+            selected => { V.put("encoder", self.current-index); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Aim for";
+        Seg {
+            name: "Aim for";
+            options: ["A quality level", "A bitrate", "A file size"];
+            current: V.rate-mode;
+            picked(i) => { V.put("rate-mode", i); }
+        }
+    }
+    if !V.is-copy && V.rate-mode == 0: Field {
+        label: "Quality";
+        hint: V.quality-hint;
+        Note { text: "Smaller file"; font-size: 12px; }
+        Slide {
+            name: "Quality";
+            width: 260px;
+            value: V.quality;
+            moved-to(v) => { V.put("quality", v); }
+        }
+        Note { text: "Better quality"; font-size: 12px; }
+    }
+    if !V.is-copy && V.rate-mode == 1: Field {
+        label: "Video bitrate";
+        hint: V.kbps-hint;
+        Num {
+            key: "kbps";
+            text <=> V.kbps-text;
+            accessible-label: "Video bitrate";
+        }
+        Note { text: "kbps"; }
+    }
+    if !V.is-copy && V.rate-mode == 2: Field {
+        label: "File size";
+        hint: "Video and sound together land just under this size. A file that is already smaller is never made bigger.";
+        Num {
+            key: "size";
+            text <=> V.size-text;
+            accessible-label: "File size";
+        }
+        Note { text: "MB"; }
+        for mb in [10, 25, 50, 100, 500]: Btn {
+            text: mb + " MB";
+            height: 28px;
+            clicked => { V.put("size", mb); }
+        }
+    }
+    if !V.is-copy && V.rate-mode != 0 && V.two-pass-allowed: Field {
+        label: "Two passes";
+        hint: "Looks at the whole video first, then encodes. Takes longer and hits the size or bitrate more exactly.";
+        Toggle {
+            text: "Use two passes";
+            on: V.two-pass;
+            toggled(on) => { V.put("two-pass", on ? 1 : 0); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Speed";
+        hint: "Slower settings squeeze out a smaller file at the same quality.";
+        Seg {
+            name: "Speed";
+            options: ["Slowest", "Slow", "Medium", "Fast", "Fastest"];
+            current: V.speed;
+            picked(i) => { V.put("speed", i); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Resolution";
+        ComboBox {
+            width: 240px;
+            model: V.resolutions;
+            current-index <=> V.resolution;
+            accessible-label: "Resolution";
+            selected => { V.put("resolution", self.current-index); }
+        }
+        if V.custom-size: Num {
+            key: "width";
+            text <=> V.width-text;
+            accessible-label: "Width";
+        }
+        if V.custom-size: Note { text: "×"; }
+        if V.custom-size: Num {
+            key: "height";
+            text <=> V.height-text;
+            accessible-label: "Height";
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Frame rate";
+        ComboBox {
+            width: 240px;
+            model: V.rates;
+            current-index <=> V.rate;
+            accessible-label: "Frame rate";
+            selected => { V.put("rate", self.current-index); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Crop";
+        hint: V.crop-hint;
+        Seg {
+            name: "Crop";
+            options: ["None", "Remove black bars", "Custom"];
+            current: V.crop-mode;
+            picked(i) => { V.put("crop-mode", i); }
+        }
+    }
+    if !V.is-copy && V.crop-mode == 2: Field {
+        label: "";
+        Note { text: "Width"; font-size: 12px; }
+        Num { key: "crop-w"; width: 70px; text <=> V.crop-w; accessible-label: "Crop width"; }
+        Note { text: "Height"; font-size: 12px; }
+        Num { key: "crop-h"; width: 70px; text <=> V.crop-h; accessible-label: "Crop height"; }
+        Note { text: "Left"; font-size: 12px; }
+        Num { key: "crop-x"; width: 70px; text <=> V.crop-x; accessible-label: "Crop left"; }
+        Note { text: "Top"; font-size: 12px; }
+        Num { key: "crop-y"; width: 70px; text <=> V.crop-y; accessible-label: "Crop top"; }
+    }
+    if !V.is-copy: Field {
+        label: "Colour depth";
+        hint: V.ten-allowed ? "Automatic keeps 10-bit sources 10-bit and uses 10-bit for AV1, which compresses better." : "This encoder only produces 8-bit video.";
+        Seg {
+            name: "Colour depth";
+            options: V.ten-allowed ? ["Automatic", "8-bit", "10-bit"] : ["Automatic", "8-bit"];
+            current: V.depth;
+            picked(i) => { V.put("depth", i); }
+        }
+    }
+    if !V.is-copy && V.is-hdr: Field {
+        label: "HDR";
+        hint: "Converting to standard range makes the video look right on screens that cannot show HDR.";
+        Seg {
+            name: "HDR";
+            options: ["Keep HDR", "Convert to standard range"];
+            current: V.hdr;
+            picked(i) => { V.put("hdr", i); }
+        }
+    }
+    if !V.is-copy && V.grain-allowed: Field {
+        label: "Film grain";
+        hint: "Removes grain before encoding and adds matching synthetic grain on playback. Saves a lot of space on grainy footage; leave at 0 for clean video.";
+        Slide {
+            name: "Film grain";
+            width: 260px;
+            maximum: 50;
+            value: V.grain;
+            moved-to(v) => { V.put("grain", v); }
+        }
+        Note { text: round(V.grain); color: Theme.fg; }
+    }
+}
+
+component AudioTab inherits VerticalLayout {
+    spacing: 4px;
+    if V.audio.length == 0: Text {
+        text: V.joined ? "Joined videos get one stereo sound track." : "This video has no sound.";
+        color: Theme.muted;
+    }
+    for a[i] in V.audio: VerticalLayout {
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                alignment: center;
+                Check {
+                    on: a.keep;
+                    name: "Keep " + a.title;
+                    toggled(on) => { V.audio-put(i, "keep", on ? 1 : 0); }
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: a.title;
+                    color: Theme.fg;
+                    font-weight: 500;
+                }
+                Text {
+                    text: a.detail;
+                    color: Theme.muted;
+                    font-size: 12px;
+                }
+            }
+        }
+        if a.keep: HorizontalLayout {
+            padding-left: 28px;
+            spacing: 8px;
+            alignment: start;
+            ComboBox {
+                width: 190px;
+                model: ["Keep original", "AAC", "Opus", "AC-3 (Dolby Digital)", "FLAC (lossless)"];
+                current-index: a.codec;
+                accessible-label: "Format for " + a.title;
+                selected => { V.audio-put(i, "codec", self.current-index); }
+            }
+            if a.codec != 0 && a.codec != 4: ComboBox {
+                width: 120px;
+                model: ["64 kbps", "96 kbps", "128 kbps", "160 kbps", "192 kbps", "256 kbps", "320 kbps", "448 kbps", "640 kbps"];
+                current-index: a.kbps;
+                accessible-label: "Bitrate for " + a.title;
+                selected => { V.audio-put(i, "kbps", self.current-index); }
+            }
+            if a.codec != 0: ComboBox {
+                width: 190px;
+                model: ["Same channels as source", "Mono", "Stereo", "5.1 surround"];
+                current-index: a.mix;
+                accessible-label: "Channels for " + a.title;
+                selected => { V.audio-put(i, "mix", self.current-index); }
+            }
+        }
+        Hairline { }
+    }
+}
+
+component SubtitlesTab inherits VerticalLayout {
+    spacing: 4px;
+    if V.subs.length == 0: Text {
+        text: V.joined ? "Subtitles are not carried into a joined video." : "This video has no subtitle tracks.";
+        color: Theme.muted;
+    }
+    for s[i] in V.subs: VerticalLayout {
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: s.title;
+                    color: Theme.fg;
+                    font-weight: 500;
+                }
+                Text {
+                    text: s.detail;
+                    color: Theme.muted;
+                    font-size: 12px;
+                }
+            }
+            Seg {
+                name: s.title;
+                options: ["Leave out", "Keep as a track", "Burn into the picture"];
+                current: s.mode;
+                picked(m) => { V.sub-put(i, "mode", m); }
+            }
+        }
+        if s.mode == 1: HorizontalLayout {
+            alignment: start;
+            Toggle {
+                text: "Shown by default";
+                on: s.shown-by-default;
+                toggled(on) => { V.sub-put(i, "default", on ? 1 : 0); }
+            }
+        }
+        Hairline { }
+    }
+    Field {
+        label: "Chapters";
+        hint: V.chapters-hint;
+        Toggle {
+            text: "Keep chapter markers";
+            on: V.keep-chapters;
+            toggled(on) => { V.put("keep-chapters", on ? 1 : 0); }
+        }
+    }
+    Field {
+        label: "Metadata";
+        hint: "Title, creation date and similar tags stored in the file.";
+        Toggle {
+            text: "Keep metadata";
+            on: V.keep-metadata;
+            toggled(on) => { V.put("keep-metadata", on ? 1 : 0); }
+        }
+    }
+}
+
+component FiltersTab inherits VerticalLayout {
+    if V.is-copy: Text {
+        text: "Filters need the video to be re-encoded. Choose an encoder other than \"Copy\" on the Video tab to use them.";
+        color: Theme.muted;
+        wrap: word-wrap;
+    }
+    if !V.is-copy: Field {
+        label: "Deinterlace";
+        hint: V.deinterlace-hint;
+        Seg {
+            name: "Deinterlace";
+            options: ["Off", "Standard", "Higher quality"];
+            current: V.deinterlace;
+            picked(i) => { V.put("deinterlace", i); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Reduce noise";
+        hint: "Smooths out sensor noise, which also makes the file smaller. Strong settings blur fine detail.";
+        Seg {
+            name: "Reduce noise";
+            options: ["Off", "Light", "Medium", "Strong"];
+            current: V.denoise;
+            picked(i) => { V.put("denoise", i); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Sharpen";
+        Seg {
+            name: "Sharpen";
+            options: ["Off", "Light", "Medium", "Strong"];
+            current: V.sharpen;
+            picked(i) => { V.put("sharpen", i); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Rotate";
+        Seg {
+            name: "Rotate";
+            options: ["None", "90° right", "180°", "90° left"];
+            current: V.rotate;
+            picked(i) => { V.put("rotate", i); }
+        }
+    }
+    if !V.is-copy: Field {
+        label: "Flip";
+        Toggle {
+            text: "Left to right";
+            on: V.flip-h;
+            toggled(on) => { V.put("flip-h", on ? 1 : 0); }
+        }
+        Toggle {
+            text: "Upside down";
+            on: V.flip-v;
+            toggled(on) => { V.put("flip-v", on ? 1 : 0); }
+        }
+    }
+}
+
+component AdvancedEditor inherits VerticalLayout {
+    property <int> tab: 0;
+    Rectangle {
+        vertical-stretch: 2;
+        min-height: 150px;
+        Stage {
+            width: parent.width;
+            height: parent.height;
+            show-compare: V.has-compare;
+            busy: V.comparing;
+            busy-text: V.compare-stage;
+            busy-progress: V.compare-progress;
+        }
+        HorizontalLayout {
+            x: parent.width - self.preferred-width - 8px;
+            y: 8px;
+            width: self.preferred-width;
+            height: 30px;
+            spacing: 6px;
+            if !V.has-compare && !V.comparing && !V.joined: Btn {
+                text: "Compare before and after";
+                height: 30px;
+                background: Theme.raised;
+                clicked => { V.compare(); }
+            }
+            if V.has-compare || V.comparing: Btn {
+                text: V.comparing ? "Cancel" : "Close comparison";
+                height: 30px;
+                background: Theme.raised;
+                clicked => { V.close-compare(); }
+            }
+        }
+    }
+    Hairline { }
+    Rectangle {
+        vertical-stretch: 0;
+        background: Theme.panel;
+        VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            CutBar { }
+        }
+    }
+    Hairline { }
+    HorizontalLayout {
+        vertical-stretch: 0;
+        height: 44px;
+        padding-left: 16px;
+        padding-right: 12px;
+        spacing: 14px;
+        for name[i] in ["Summary", "Video", V.audio-tab, V.subs-tab, "Filters"]: Rectangle {
+            width: tab-label.preferred-width;
+            accessible-role: AccessibleRole.tab;
+            accessible-label: name;
+            accessible-action-default => { root.tab = i; }
+            tab-label := Text {
+                text: name;
+                color: i == root.tab || tab-touch.has-hover ? Theme.fg : Theme.muted;
+                font-weight: i == root.tab ? 500 : 400;
+                vertical-alignment: center;
+            }
+            if i == root.tab: Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                background: Theme.primary;
+            }
+            tab-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.tab = i; }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        VerticalLayout {
+            alignment: center;
+            Btn {
+                text: "Add to queue";
+                kind: 1;
+                enabled: V.plan-error == "";
+                clicked => { V.add-to-queue(); }
+            }
+        }
+    }
+    Hairline { }
+    sv := ScrollView {
+        vertical-stretch: 3;
+        min-height: 160px;
+        VerticalLayout {
+            width: sv.visible-width;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 10px;
+            padding-bottom: 14px;
+            alignment: start;
+            if root.tab == 0: Field {
+                label: "Preset";
+                hint: "A preset is a saved set of settings. Picking one replaces the settings on every tab.";
+                ComboBox {
+                    width: 260px;
+                    model: V.presets;
+                    current-index <=> V.preset;
+                    accessible-label: "Preset";
+                    selected => { V.pick-preset(self.current-index); }
+                }
+            }
+            if root.tab == 0: SummaryTab { }
+            if root.tab == 0: HorizontalLayout {
+                padding-top: 10px;
+                spacing: 8px;
+                alignment: start;
+                Btn {
+                    text: "Save these settings as a preset…";
+                    clicked => { V.save-preset(); }
+                }
+                if V.preset-is-mine: Btn {
+                    text: "Delete this preset";
+                    clicked => { V.delete-preset(); }
+                }
+            }
+            if root.tab == 0: HorizontalLayout {
+                padding-top: 4px;
+                spacing: 8px;
+                alignment: start;
+                Btn {
+                    text: "Import presets…";
+                    kind: 2;
+                    clicked => { V.import-presets(); }
+                }
+                Btn {
+                    text: "Export my presets…";
+                    kind: 2;
+                    clicked => { V.export-presets(); }
+                }
+            }
+            if root.tab == 1: VideoTab { }
+            if root.tab == 2: AudioTab { }
+            if root.tab == 3: SubtitlesTab { }
+            if root.tab == 4: FiltersTab { }
+        }
+    }
+}
+
+export component VideoEditor inherits Rectangle {
+    horizontal-stretch: 1;
+    min-width: 440px;
+    background: Theme.bg;
+    if !V.has-source: Empty {
+        title: V.videos.length == 0 ? "Nothing to set up yet" : "Pick a video";
+        body: V.videos.length == 0 ? "Add a video on the left. The app checks it and shows you three sizes to choose from." : "Choose a video on the left.";
+    }
+    if V.has-source && !V.advanced: EasyEditor { }
+    if V.has-source && V.advanced: AdvancedEditor { }
+}

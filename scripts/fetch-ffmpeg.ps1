@@ -1,8 +1,8 @@
 # Downloads ffmpeg + ffprobe (shared build) into engine/ so they can be bundled
 # with the app. The binaries are GPL-licensed and are not stored in git.
 #
-#   npm run fetch-ffmpeg            # skip if already present
-#   npm run fetch-ffmpeg -- -Force  # download again
+#   powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1          # skip if already present
+#   powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1 -Force   # download again
 
 param(
     [switch]$Force,

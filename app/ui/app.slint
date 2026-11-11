@@ -1,0 +1,628 @@
+// Make Video Small — the main window.
+
+import { ScrollView, ComboBox, LineEdit, AboutSlint } from "std-widgets.slint";
+import { Theme, Btn, Seg, Toggle, Hairline } from "theme.slint";
+import { V, SourcesPane, VideoEditor } from "video.slint";
+import { Q, QueuePane } from "queue.slint";
+import { I, ImageStudio } from "image.slint";
+
+export { V, Q, I }
+
+export global A {
+    // 0 video, 1 pictures
+    in property <int> mode;
+    in property <bool> ready;
+    in property <string> failed;
+    in property <string> problem;
+    in property <bool> advanced;
+
+    // A message that goes away by itself. kind: 0 plain, 1 good, 2 warning, 3 error.
+    in property <string> toast;
+    in property <string> toast-detail;
+    in property <int> toast-kind;
+    in property <string> toast-action;
+
+    in property <bool> settings-open;
+    in property <bool> log-open;
+    in property <string> log-title;
+    in property <string> log-text;
+    in property <bool> naming;
+    in-out property <string> name-text;
+    in property <bool> confirm-quit;
+
+    callback set-mode(int);
+    callback set-advanced(bool);
+    callback open-settings(bool);
+    callback toast-clicked();
+    callback toast-dismissed();
+    callback close-log();
+    callback copy-log();
+    callback name-done(bool);
+    callback quit-answer(bool);
+}
+
+export global S {
+    in property <bool> beside: true;
+    in property <string> folder;
+    in-out property <string> suffix;
+    in property <string> suffix-example;
+    in property <bool> has-gpu;
+    in property <bool> prefer-gpu;
+    in property <int> impact;
+    in property <bool> delete-original;
+    in property <bool> sound;
+    in property <bool> shutdown;
+    in property <bool> advanced;
+    in property <[string]> presets;
+    in-out property <int> default-preset;
+    in property <int> parallel;
+    in property <bool> hardware-decode;
+    in property <string> about;
+    callback put(string, float);
+    callback put-text(string, string);
+    callback choose-folder();
+}
+
+// One of several big either/or answers.
+component Answer inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> selected;
+    callback picked;
+    horizontal-stretch: 1;
+    min-height: 64px;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: root.selected ? Theme.primary : (touch.has-hover ? Theme.faint : Theme.border);
+    background: root.selected ? Theme.tint : transparent;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-description: root.detail;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.picked(); }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 3px;
+        alignment: center;
+        Text {
+            text: root.title;
+            color: Theme.fg;
+            font-weight: 500;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detail;
+            color: Theme.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component Question inherits VerticalLayout {
+    in property <string> title;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    spacing: 10px;
+    Text {
+        text: root.title;
+        color: Theme.fg;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    @children
+}
+
+// A panel on top of everything, with the rest dimmed behind it.
+component Sheet inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <length> sheet-width: 640px;
+    in property <length> sheet-height: 520px;
+    callback closed;
+    background: #0a0c12b8;
+    TouchArea {
+        clicked => { root.closed(); }
+    }
+    Rectangle {
+        width: min(root.sheet-width, root.width - 40px);
+        height: min(root.sheet-height, root.height - 40px);
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.border;
+        background: #1f2430;
+        accessible-role: groupbox;
+        accessible-label: root.title;
+        // Swallow clicks so they do not close the sheet.
+        TouchArea { }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 4px;
+            HorizontalLayout {
+                Text {
+                    text: root.title;
+                    color: Theme.fg;
+                    font-size: 17px;
+                    font-weight: 600;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Btn {
+                    text: "Close";
+                    kind: 2;
+                    height: 28px;
+                    clicked => { root.closed(); }
+                }
+            }
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: Theme.muted;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 6px; }
+            @children
+        }
+    }
+}
+
+component SettingsSheet inherits Sheet {
+    title: "Settings";
+    subtitle: "Changes are saved straight away.";
+    sheet-width: 680px;
+    sheet-height: 640px;
+    sv := ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            width: sv.visible-width;
+            padding-right: 12px;
+            alignment: start;
+
+            Question {
+                title: "Where should finished files go?";
+                HorizontalLayout {
+                    spacing: 8px;
+                    Answer {
+                        title: "Next to the original";
+                        detail: "The small copy appears in the same folder as the video you added.";
+                        selected: S.beside;
+                        picked => { S.put("beside", 1); }
+                    }
+                    Answer {
+                        title: "In one folder";
+                        detail: "Every finished file goes to a folder you choose.";
+                        selected: !S.beside;
+                        picked => { S.choose-folder(); }
+                    }
+                }
+                if !S.beside: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: S.folder;
+                        color: Theme.fg;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Btn {
+                        text: "Choose another…";
+                        height: 28px;
+                        clicked => { S.choose-folder(); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: "Add this to the end of the name:";
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    LineEdit {
+                        width: 120px;
+                        height: 30px;
+                        text <=> S.suffix;
+                        accessible-label: "Name ending";
+                        accepted => { S.put-text("suffix", self.text); }
+                        changed has-focus => {
+                            if (!self.has-focus) { S.put-text("suffix", self.text); }
+                        }
+                    }
+                }
+                Text {
+                    text: S.suffix-example;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+            Hairline { }
+
+            if S.has-gpu: Question {
+                title: "What matters more to you?";
+                HorizontalLayout {
+                    spacing: 8px;
+                    Answer {
+                        title: "Finish quickly";
+                        detail: "Uses your graphics card. Several times faster; files come out a little bigger.";
+                        selected: S.prefer-gpu;
+                        picked => { S.put("prefer-gpu", 1); }
+                    }
+                    Answer {
+                        title: "Smallest files";
+                        detail: "Uses the processor and the AV1 format. Much slower, but the smallest result.";
+                        selected: !S.prefer-gpu;
+                        picked => { S.put("prefer-gpu", 0); }
+                    }
+                }
+            }
+            if S.has-gpu: Hairline { }
+
+            Question {
+                title: "While it is working, how should your PC feel?";
+                HorizontalLayout {
+                    spacing: 8px;
+                    Answer {
+                        title: "Normal";
+                        detail: "Other programs always go first. Compressing takes longer.";
+                        selected: S.impact == 0;
+                        picked => { S.put("impact", 0); }
+                    }
+                    Answer {
+                        title: "A bit busy";
+                        detail: "A good middle. Fine for browsing and office work.";
+                        selected: S.impact == 1;
+                        picked => { S.put("impact", 1); }
+                    }
+                    Answer {
+                        title: "As fast as possible";
+                        detail: "Compressing goes first. Everything else may feel slow.";
+                        selected: S.impact == 2;
+                        picked => { S.put("impact", 2); }
+                    }
+                }
+            }
+            Hairline { }
+
+            Question {
+                title: "When a video is finished";
+                Toggle {
+                    text: "Move the original to the Recycle Bin";
+                    detail: "Only after the small copy was made without problems. You can get it back from the Recycle Bin.";
+                    on: S.delete-original;
+                    toggled(on) => { S.put("delete-original", on ? 1 : 0); }
+                }
+            }
+            Hairline { }
+
+            Question {
+                title: "When everything in the queue is finished";
+                Toggle {
+                    text: "Play a sound";
+                    on: S.sound;
+                    toggled(on) => { S.put("sound", on ? 1 : 0); }
+                }
+                Toggle {
+                    text: "Turn the PC off";
+                    detail: "You get 30 seconds to cancel. This switches itself back off afterwards.";
+                    on: S.shutdown;
+                    toggled(on) => { S.put("shutdown", on ? 1 : 0); }
+                }
+            }
+            Hairline { }
+
+            Question {
+                title: "For experts";
+                Toggle {
+                    text: "Show advanced video controls";
+                    detail: "Choose the exact format, quality number, size, sound tracks, subtitles and filters yourself, and save your own presets.";
+                    on: S.advanced;
+                    toggled(on) => { S.put("advanced", on ? 1 : 0); }
+                }
+                if S.advanced: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        width: 190px;
+                        text: "New videos start with";
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        width: 280px;
+                        model: S.presets;
+                        current-index <=> S.default-preset;
+                        accessible-label: "Preset for new videos";
+                        selected => { S.put("default-preset", self.current-index); }
+                    }
+                }
+                if S.advanced: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        width: 190px;
+                        text: "Videos compressed at once";
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    Seg {
+                        name: "Videos compressed at once";
+                        options: ["1", "2", "3", "4"];
+                        current: S.parallel - 1;
+                        picked(i) => { S.put("parallel", i + 1); }
+                    }
+                }
+                if S.advanced: Toggle {
+                    text: "Also read videos with the graphics card";
+                    detail: "Faster when the graphics card does the compressing. Falls back by itself if a video does not support it.";
+                    on: S.hardware-decode;
+                    toggled(on) => { S.put("hardware-decode", on ? 1 : 0); }
+                }
+            }
+            Hairline { }
+
+            Question {
+                title: "About";
+                Text {
+                    text: S.about;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    AboutSlint {
+                        width: 150px;
+                        height: 84px;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component App inherits Window {
+    title: "Make Video Small";
+    icon: @image-url("../assets/logo.png");
+    min-width: 1080px;
+    min-height: 660px;
+    preferred-width: 1360px;
+    preferred-height: 800px;
+    background: Theme.bg;
+    default-font-size: 13px;
+    default-font-family: "Segoe UI";
+
+    VerticalLayout {
+        // ───────────── Toolbar ─────────────
+        Rectangle {
+            height: 44px;
+            vertical-stretch: 0;
+            background: Theme.panel;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 12px;
+                Seg {
+                    name: "What to work on";
+                    options: ["Videos", "Pictures"];
+                    current: A.mode;
+                    picked(i) => { A.set-mode(i); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if A.mode == 0: Toggle {
+                    text: "Advanced";
+                    on: A.advanced;
+                    toggled(on) => { A.set-advanced(on); }
+                }
+                Btn {
+                    text: "Settings";
+                    clicked => { A.open-settings(true); }
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
+            }
+        }
+
+        if A.problem != "": Rectangle {
+            vertical-stretch: 0;
+            height: problem-text.preferred-height + 16px;
+            background: #f0616d22;
+            problem-text := Text {
+                x: 14px;
+                width: parent.width - 28px;
+                text: A.problem;
+                color: Theme.bad;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+        }
+
+        // ───────────── Body ─────────────
+        if A.failed != "": VerticalLayout {
+            alignment: center;
+            spacing: 10px;
+            padding: 40px;
+            Text {
+                text: "Make Video Small could not start";
+                color: Theme.fg;
+                font-size: 15px;
+                font-weight: 500;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: A.failed;
+                color: Theme.muted;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        if A.failed == "" && !A.ready: VerticalLayout {
+            alignment: center;
+            Text {
+                text: "Checking which encoders this PC can use…";
+                color: Theme.muted;
+                horizontal-alignment: center;
+            }
+        }
+        if A.failed == "" && A.ready && A.mode == 0: HorizontalLayout {
+            SourcesPane { }
+            VideoEditor { }
+            QueuePane { }
+        }
+        if A.failed == "" && A.ready && A.mode == 1: ImageStudio { }
+    }
+
+    // ───────────── On top of everything ─────────────
+    if A.settings-open: SettingsSheet {
+        closed => { A.open-settings(false); }
+    }
+
+    if A.log-open: Sheet {
+        title: A.log-title;
+        subtitle: "Everything ffmpeg reported for this video.";
+        sheet-width: 820px;
+        sheet-height: 560px;
+        closed => { A.close-log(); }
+        log-sv := ScrollView {
+            vertical-stretch: 1;
+            Rectangle {
+                width: log-sv.visible-width;
+                height: max(log-sv.visible-height, log-body.preferred-height + 16px);
+                background: Theme.stage;
+                border-radius: 6px;
+                log-body := Text {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    text: A.log-text;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    wrap: char-wrap;
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            padding-top: 8px;
+            Btn {
+                text: "Copy log";
+                clicked => { A.copy-log(); }
+            }
+        }
+    }
+
+    if A.naming: Sheet {
+        title: "Save as preset";
+        subtitle: "The cut and the file name are not part of a preset.";
+        sheet-width: 440px;
+        sheet-height: 210px;
+        closed => { A.name-done(false); }
+        LineEdit {
+            height: 32px;
+            placeholder-text: "Preset name";
+            text <=> A.name-text;
+            accessible-label: "Preset name";
+            accepted => { A.name-done(true); }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            padding-top: 10px;
+            Btn {
+                text: "Cancel";
+                kind: 2;
+                clicked => { A.name-done(false); }
+            }
+            Btn {
+                text: "Save preset";
+                kind: 1;
+                enabled: A.name-text != "";
+                clicked => { A.name-done(true); }
+            }
+        }
+    }
+
+    if A.confirm-quit: Sheet {
+        title: "Quit Make Video Small?";
+        subtitle: "A video is still being compressed. If you quit now, it starts over the next time you run the queue. Finished files are kept.";
+        sheet-width: 460px;
+        sheet-height: 220px;
+        closed => { A.quit-answer(false); }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Btn {
+                text: "Keep compressing";
+                kind: 1;
+                clicked => { A.quit-answer(false); }
+            }
+            Btn {
+                text: "Quit";
+                clicked => { A.quit-answer(true); }
+            }
+        }
+    }
+
+    if A.toast != "": Rectangle {
+        x: (root.width - self.width) / 2;
+        y: 54px;
+        width: min(root.width - 80px, max(320px, toast-row.preferred-width + 28px));
+        height: A.toast-detail == "" ? 44px : 64px;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: A.toast-kind == 3 ? Theme.bad : (A.toast-kind == 2 ? Theme.primary : (A.toast-kind == 1 ? Theme.saved : Theme.border));
+        background: #1f2430;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: #00000080;
+        accessible-role: text;
+        accessible-label: "Message: " + A.toast;
+        accessible-description: A.toast-detail;
+        toast-row := HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 8px;
+            spacing: 10px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                Text {
+                    text: A.toast;
+                    color: Theme.fg;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+                if A.toast-detail != "": Text {
+                    text: A.toast-detail;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 4px;
+                    if A.toast-action != "": Btn {
+                        text: A.toast-action;
+                        height: 28px;
+                        clicked => { A.toast-clicked(); }
+                    }
+                    Btn {
+                        text: "✕";
+                        kind: 2;
+                        height: 28px;
+                        clicked => { A.toast-dismissed(); }
+                    }
+                }
+            }
+        }
+    }
+}

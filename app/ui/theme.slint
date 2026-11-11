@@ -1,0 +1,505 @@
+// Colours and the small building blocks every screen uses.
+
+export global Theme {
+    out property <color> bg: #151821;
+    out property <color> panel: #1b1f2a;
+    out property <color> raised: #242938;
+    out property <color> stage: #0d0f15;
+    out property <color> border: #2e3446;
+    out property <color> faint: #5f6679;
+    out property <color> muted: #8f96a9;
+    out property <color> fg: #eceef3;
+    out property <color> primary: #f5b83d;
+    out property <color> on-primary: #1c1503;
+    out property <color> saved: #4cc9b0;
+    out property <color> bad: #f0616d;
+    out property <color> tint: #f5b83d14;
+}
+
+// A button. `kind`: 0 = outline, 1 = filled (the main action), 2 = bare.
+export component Btn inherits Rectangle {
+    in property <string> text;
+    in property <int> kind: 0;
+    in property <bool> enabled: true;
+    in property <length> text-size: 13px;
+    callback clicked;
+
+    height: 32px;
+    min-width: label.preferred-width + 24px;
+    horizontal-stretch: 0;
+    border-radius: 6px;
+    border-width: root.kind == 0 ? 1px : 0px;
+    border-color: Theme.border;
+    background: root.kind == 1
+        ? (touch.has-hover && root.enabled ? #ffc85a : Theme.primary)
+        : (touch.has-hover && root.enabled ? Theme.raised : transparent);
+    opacity: root.enabled ? 1.0 : 0.45;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    label := Text {
+        text: root.text;
+        color: root.kind == 1 ? Theme.on-primary : Theme.fg;
+        font-size: root.text-size;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A row of mutually exclusive choices.
+export component Seg inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    in property <string> name;
+    in property <bool> enabled: true;
+    callback picked(int);
+
+    height: 32px;
+    horizontal-stretch: 0;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: #20242f;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    HorizontalLayout {
+        padding: 2px;
+        for option[i] in root.options: Rectangle {
+            min-width: seg-label.preferred-width + 22px;
+            horizontal-stretch: 1;
+            border-radius: 4px;
+            background: i == root.current ? Theme.raised : transparent;
+            accessible-role: button;
+            accessible-label: root.name + ": " + option;
+            accessible-checked: i == root.current;
+            accessible-action-default => { if (root.enabled) { root.picked(i); } }
+            seg-label := Text {
+                text: option;
+                color: i == root.current || seg-touch.has-hover ? Theme.fg : Theme.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            seg-touch := TouchArea {
+                enabled: root.enabled;
+                mouse-cursor: pointer;
+                clicked => { root.picked(i); }
+            }
+        }
+    }
+}
+
+// An on/off switch with its label.
+export component Toggle inherits Rectangle {
+    in property <string> text;
+    in property <string> detail;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    min-height: root.detail == "" ? 28px : 44px;
+    opacity: root.enabled ? 1.0 : 0.45;
+    accessible-role: switch;
+    accessible-label: root.text;
+    accessible-checked: root.on;
+    accessible-action-default => { if (root.enabled) { root.toggled(!root.on); } }
+
+    HorizontalLayout {
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 34px;
+                height: 18px;
+                border-radius: 9px;
+                background: root.on ? Theme.primary : #363d52;
+                Rectangle {
+                    x: root.on ? 18px : 2px;
+                    y: 2px;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: root.on ? Theme.on-primary : Theme.fg;
+                    animate x { duration: 120ms; easing: ease-out; }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.text;
+                color: Theme.fg;
+                wrap: word-wrap;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                color: Theme.muted;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.toggled(!root.on); }
+    }
+}
+
+// A tick box.
+export component Check inherits Rectangle {
+    in property <bool> on;
+    in property <string> name;
+    callback toggled(bool);
+
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border-width: 1.5px;
+    border-color: root.on ? Theme.primary : Theme.faint;
+    background: root.on ? Theme.primary : transparent;
+    accessible-role: checkbox;
+    accessible-label: root.name;
+    accessible-checked: root.on;
+    accessible-action-default => { root.toggled(!root.on); }
+
+    if root.on: Text {
+        text: "✓";
+        color: Theme.on-primary;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(!root.on); }
+    }
+}
+
+// A slider. `moved-to` fires while dragging, `let-go` once at the end.
+export component Slide inherits Rectangle {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> value;
+    in property <string> name;
+    // Part of the track to mark as "kept" (used by the cut bar), 0 – 1.
+    in property <float> mark-from: 0;
+    in property <float> mark-to: 0;
+    callback moved-to(float);
+    callback let-go(float);
+
+    property <float> fraction: root.maximum > root.minimum ? clamp((root.value - root.minimum) / (root.maximum - root.minimum), 0, 1) : 0;
+    height: 20px;
+    accessible-role: slider;
+    accessible-label: root.name;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-action-set-value(v) => {
+        root.moved-to(v.to-float());
+        root.let-go(v.to-float());
+    }
+
+    Rectangle {
+        y: (parent.height - 4px) / 2;
+        height: 4px;
+        border-radius: 2px;
+        background: #2a3041;
+        if root.mark-to > root.mark-from: Rectangle {
+            x: parent.width * root.mark-from;
+            width: parent.width * (root.mark-to - root.mark-from);
+            border-radius: 2px;
+            background: Theme.primary;
+        }
+        if root.mark-to <= root.mark-from: Rectangle {
+            x: 0;
+            width: parent.width * root.fraction;
+            border-radius: 2px;
+            background: Theme.primary;
+        }
+    }
+    Rectangle {
+        x: (parent.width - 14px) * root.fraction;
+        y: (parent.height - 14px) / 2;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: Theme.primary;
+        border-width: 2px;
+        border-color: Theme.bg;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        property <float> at: root.minimum + clamp((self.mouse-x - 7px) / (self.width - 14px), 0, 1) * (root.maximum - root.minimum);
+        moved => {
+            if (self.pressed) { root.moved-to(self.at); }
+        }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) { root.moved-to(self.at); }
+            if (e.kind == PointerEventKind.up) { root.let-go(self.at); }
+        }
+    }
+}
+
+// A labelled setting: label on the left, control on the right, help below.
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> hint;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    spacing: 5px;
+    HorizontalLayout {
+        spacing: 14px;
+        Text {
+            width: 140px;
+            text: root.label;
+            color: Theme.muted;
+            vertical-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            horizontal-stretch: 1;
+            @children
+        }
+    }
+    if root.hint != "": HorizontalLayout {
+        padding-left: 154px;
+        Text {
+            text: root.hint;
+            color: Theme.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component PaneTitle inherits Rectangle {
+    in property <string> text;
+    in property <string> note;
+    height: 44px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.note;
+            color: Theme.muted;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 4px;
+            padding-top: 7px;
+            padding-bottom: 7px;
+            @children
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+export component Hairline inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+// "Nothing here yet" filler.
+export component Empty inherits VerticalLayout {
+    in property <string> title;
+    in property <string> body;
+    alignment: center;
+    spacing: 10px;
+    padding: 28px;
+    Text {
+        text: root.title;
+        color: Theme.fg;
+        font-size: 15px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.body != "": Text {
+        text: root.body;
+        color: Theme.muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        alignment: center;
+        @children
+    }
+}
+
+// The shrink meter: the whole bar is the original, the filled part the result.
+export component Meter inherits Rectangle {
+    // Result ÷ original; negative when not known yet.
+    in property <float> ratio: -1;
+    in property <bool> final;
+    height: 6px;
+    border-radius: 3px;
+    background: #2a3041;
+    if root.ratio >= 0: Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.ratio, 0.015, 1);
+        border-radius: 3px;
+        background: root.ratio > 1 ? Theme.bad : (root.final ? Theme.saved : Theme.primary);
+        animate width { duration: 300ms; easing: ease-out; }
+    }
+}
+
+// Two pictures with a divider you drag between them.
+export component Compare inherits Rectangle {
+    in property <image> left;
+    in property <image> right;
+    in property <string> left-caption: "Original";
+    in property <string> right-caption;
+    in property <bool> checker;
+    property <float> split: 0.5;
+    clip: true;
+    background: Theme.stage;
+
+    // See-through parts of the result show a checkerboard, as in photo editors.
+    if root.checker: Image {
+        width: root.width;
+        height: root.height;
+        source: @image-url("checker.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+    }
+    Image {
+        width: root.width;
+        height: root.height;
+        source: root.right;
+        image-fit: contain;
+    }
+    Rectangle {
+        x: 0;
+        width: root.width * root.split;
+        height: root.height;
+        clip: true;
+        background: Theme.stage;
+        Image {
+            x: 0;
+            width: root.width;
+            height: root.height;
+            source: root.left;
+            image-fit: contain;
+        }
+    }
+    Rectangle {
+        x: root.width * root.split - 1px;
+        width: 2px;
+        background: white;
+    }
+    Rectangle {
+        x: root.width * root.split - 15px;
+        y: root.height / 2 - 15px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        background: #000000a0;
+        border-width: 2px;
+        border-color: white;
+        Text {
+            text: "↔";
+            color: white;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        mouse-cursor: col-resize;
+        moved => {
+            if (self.pressed) { root.split = clamp(self.mouse-x / root.width, 0.02, 0.98); }
+        }
+        clicked => { root.split = clamp(self.mouse-x / root.width, 0.02, 0.98); }
+    }
+    Rectangle {
+        x: 8px;
+        y: root.height - 30px;
+        width: cap-l.preferred-width + 16px;
+        height: 22px;
+        border-radius: 3px;
+        background: #000000b3;
+        cap-l := Text {
+            text: root.left-caption;
+            color: white;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    if root.right-caption != "": Rectangle {
+        x: root.width - self.width - 8px;
+        y: root.height - 30px;
+        width: cap-r.preferred-width + 16px;
+        height: 22px;
+        border-radius: 3px;
+        background: #000000b3;
+        cap-r := Text {
+            text: root.right-caption;
+            color: white;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A busy veil with a message and a progress bar.
+export component Working inherits Rectangle {
+    in property <string> text;
+    in property <float> progress;
+    background: #0d0f15cc;
+    accessible-role: progress-indicator;
+    accessible-label: root.text;
+    VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            font-weight: 500;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 280px;
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.raised;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * clamp(root.progress, 0, 1);
+                    border-radius: 2px;
+                    background: Theme.primary;
+                    animate width { duration: 250ms; }
+                }
+            }
+        }
+    }
+}

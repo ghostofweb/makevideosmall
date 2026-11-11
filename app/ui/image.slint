@@ -1,0 +1,636 @@
+// The picture tools: make smaller, fit a size, crop, remove background, make bigger.
+
+import { ListView, ScrollView, LineEdit } from "std-widgets.slint";
+import { Theme, Btn, Seg, Slide, PaneTitle, Hairline, Empty, Meter, Compare } from "theme.slint";
+
+export struct PicRow {
+    name: string,
+    detail: string,
+    thumb: image,
+    has-thumb: bool,
+    // 0 ready, 1 working, 2 done, 3 failed
+    state: int,
+    message: string,
+    // Result ÷ original when the tool was a shrinking one, else negative.
+    ratio: float,
+}
+
+export struct Tool {
+    title: string,
+    detail: string,
+    available: bool,
+}
+
+export global I {
+    in property <[PicRow]> pics;
+    in property <int> selected: -1;
+    in property <string> count-text;
+    in property <bool> can-add: true;
+    in property <[Tool]> tools;
+    // 0 make smaller, 1 fit a size, 2 crop, 3 remove background, 4 make bigger
+    in property <int> mode;
+    in property <[string]> formats;
+    in property <int> format;
+    in property <string> format-note;
+    in property <bool> show-quality;
+    in property <float> quality: 80;
+    in-out property <string> target-text;
+    in property <int> shape;
+    in property <string> save-in;
+    in property <bool> has-dir;
+    in property <bool> busy;
+    in property <string> go-text;
+    in property <bool> can-go;
+    in property <float> total-ratio: -1;
+    in property <string> total-text;
+
+    // The selected picture
+    in property <bool> has-preview;
+    in property <image> preview;
+    in property <bool> has-result;
+    in property <image> result;
+    // The result has the same shape as the original, so a divider makes sense.
+    in property <bool> comparable;
+    in property <string> left-caption;
+    in property <string> right-caption;
+    in property <string> note;
+    in property <bool> can-redo;
+    // Cropping: the picture's real size and the box, all in the picture's own pixels.
+    in property <bool> cropping;
+    in property <float> img-w: 1;
+    in property <float> img-h: 1;
+    in property <float> crop-x;
+    in property <float> crop-y;
+    in property <float> crop-w;
+    in property <float> crop-h;
+    in property <string> crop-text;
+
+    callback add();
+    callback clear();
+    callback select(int);
+    callback remove(int);
+    callback put(string, float);
+    callback put-text(string, string);
+    callback choose-dir();
+    callback reset-dir();
+    callback go();
+    callback cancel();
+    callback reveal();
+    callback redo();
+    // handle: 0 move, 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right.
+    // Then the box as it was when the drag began, and how far the pointer moved (picture pixels).
+    callback crop-drag(int, float, float, float, float, float, float);
+}
+
+component Grip inherits Rectangle {
+    in property <int> handle;
+    in property <length> unit;
+    property <float> sx;
+    property <float> sy;
+    property <float> sw;
+    property <float> sh;
+    property <length> px;
+    property <length> py;
+    TouchArea {
+        mouse-cursor: root.handle == 0 ? move : (root.handle == 1 || root.handle == 4 ? nwse-resize : nesw-resize);
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.sx = I.crop-x;
+                root.sy = I.crop-y;
+                root.sw = I.crop-w;
+                root.sh = I.crop-h;
+                root.px = self.absolute-position.x + self.mouse-x;
+                root.py = self.absolute-position.y + self.mouse-y;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                I.crop-drag(root.handle, root.sx, root.sy, root.sw, root.sh,
+                    (self.absolute-position.x + self.mouse-x - root.px) / root.unit,
+                    (self.absolute-position.y + self.mouse-y - root.py) / root.unit);
+            }
+        }
+    }
+}
+
+component Cropper inherits Rectangle {
+    // Window pixels per picture pixel.
+    property <length> unit: min((root.width - 48px) / I.img-w, (root.height - 48px) / I.img-h);
+    property <length> ox: (root.width - I.img-w * root.unit) / 2;
+    property <length> oy: (root.height - I.img-h * root.unit) / 2;
+    clip: true;
+    Image {
+        x: root.ox;
+        y: root.oy;
+        width: I.img-w * root.unit;
+        height: I.img-h * root.unit;
+        source: I.preview;
+        image-fit: fill;
+    }
+    // Darken everything outside the box: four panels around it.
+    Rectangle { x: 0; y: 0; width: root.width; height: root.oy + I.crop-y * root.unit; background: #080a10a0; }
+    Rectangle { x: 0; y: root.oy + (I.crop-y + I.crop-h) * root.unit; width: root.width; height: root.height - self.y; background: #080a10a0; }
+    Rectangle { x: 0; y: root.oy + I.crop-y * root.unit; width: root.ox + I.crop-x * root.unit; height: I.crop-h * root.unit; background: #080a10a0; }
+    Rectangle { x: root.ox + (I.crop-x + I.crop-w) * root.unit; y: root.oy + I.crop-y * root.unit; width: root.width - self.x; height: I.crop-h * root.unit; background: #080a10a0; }
+
+    box := Rectangle {
+        x: root.ox + I.crop-x * root.unit;
+        y: root.oy + I.crop-y * root.unit;
+        width: I.crop-w * root.unit;
+        height: I.crop-h * root.unit;
+        border-width: 2px;
+        border-color: Theme.primary;
+        accessible-role: groupbox;
+        accessible-label: "Part to keep";
+        accessible-description: I.crop-text;
+        // Thirds, to help with framing.
+        Rectangle { x: parent.width / 3; width: 1px; background: #ffffff50; }
+        Rectangle { x: parent.width * 2 / 3; width: 1px; background: #ffffff50; }
+        Rectangle { y: parent.height / 3; height: 1px; background: #ffffff50; }
+        Rectangle { y: parent.height * 2 / 3; height: 1px; background: #ffffff50; }
+        Grip { handle: 0; unit: root.unit; }
+    }
+    for corner in [1, 2, 3, 4]: Grip {
+        handle: corner;
+        unit: root.unit;
+        x: box.x + (corner == 2 || corner == 4 ? box.width : 0px) - 8px;
+        y: box.y + (corner >= 3 ? box.height : 0px) - 8px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.primary;
+        border-width: 2px;
+        border-color: Theme.bg;
+    }
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.height - 30px;
+        width: crop-cap.preferred-width + 16px;
+        height: 22px;
+        border-radius: 3px;
+        background: #000000b3;
+        crop-cap := Text {
+            text: I.crop-text;
+            color: white;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component ToolCard inherits Rectangle {
+    in property <Tool> data;
+    in property <bool> selected;
+    callback picked;
+    height: 54px;
+    horizontal-stretch: 1;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: root.selected ? Theme.primary : (touch.has-hover ? Theme.faint : Theme.border);
+    background: root.selected ? Theme.tint : transparent;
+    opacity: root.data.available ? 1.0 : 0.4;
+    accessible-role: button;
+    accessible-label: "Tool: " + root.data.title;
+    accessible-checked: root.selected;
+    accessible-enabled: root.data.available;
+    accessible-action-default => { if (root.data.available) { root.picked(); } }
+    VerticalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        alignment: center;
+        spacing: 2px;
+        Text {
+            text: root.data.title;
+            color: Theme.fg;
+            font-weight: 500;
+            overflow: elide;
+        }
+        Text {
+            text: root.data.detail;
+            color: Theme.muted;
+            font-size: 12px;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.data.available;
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component Label inherits Text {
+    color: Theme.fg;
+    font-weight: 500;
+}
+
+component Small inherits Text {
+    color: Theme.muted;
+    font-size: 12px;
+    wrap: word-wrap;
+}
+
+export component ImageStudio inherits HorizontalLayout {
+    // ───────────── The list ─────────────
+    Rectangle {
+        width: 300px;
+        horizontal-stretch: 0;
+        background: Theme.panel;
+        VerticalLayout {
+            PaneTitle {
+                text: "Pictures";
+                note: I.count-text;
+                if I.pics.length > 0: Btn {
+                    text: "Clear list";
+                    kind: 2;
+                    height: 28px;
+                    clicked => { I.clear(); }
+                }
+                Btn {
+                    text: "Add pictures";
+                    height: 28px;
+                    enabled: I.can-add;
+                    clicked => { I.add(); }
+                }
+            }
+            if I.pics.length == 0: Empty {
+                title: "Drop pictures here";
+                body: "Drag pictures or folders onto the window, or pick them yourself.";
+                Btn {
+                    text: "Add pictures";
+                    kind: 1;
+                    enabled: I.can-add;
+                    clicked => { I.add(); }
+                }
+            }
+            if I.pics.length > 0: ListView {
+                for p[i] in I.pics: Rectangle {
+                    height: p.state == 3 ? 86px : 64px;
+                    background: i == I.selected ? #2a3041cc : (pic-touch.has-hover ? #2a304166 : transparent);
+                    accessible-role: list-item;
+                    accessible-label: p.name;
+                    accessible-description: p.message;
+                    accessible-item-selected: i == I.selected;
+                    accessible-action-default => { I.select(i); }
+                    pic-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { I.select(i); }
+                    }
+                    if i == I.selected: Rectangle {
+                        x: 0;
+                        width: 2px;
+                        background: Theme.primary;
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 4px;
+                        padding-top: 9px;
+                        padding-bottom: 9px;
+                        spacing: 10px;
+                        Rectangle {
+                            width: 46px;
+                            height: 46px;
+                            border-radius: 3px;
+                            background: Theme.stage;
+                            clip: true;
+                            if p.has-thumb: Image {
+                                width: 100%;
+                                height: 100%;
+                                source: p.thumb;
+                                image-fit: cover;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: p.name;
+                                color: Theme.fg;
+                                font-weight: 500;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: p.detail;
+                                color: Theme.muted;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                            if p.state == 1: Text {
+                                text: p.message;
+                                color: Theme.primary;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                            if p.state == 3: Text {
+                                text: p.message;
+                                color: Theme.bad;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                overflow: elide;
+                            }
+                            if p.state == 2 && p.ratio >= 0: Meter {
+                                ratio: p.ratio;
+                                final: true;
+                            }
+                            if p.state == 2 && p.ratio < 0: Text {
+                                text: p.message;
+                                color: Theme.saved;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+                        if p.state != 1: Rectangle {
+                            width: 20px;
+                            accessible-role: button;
+                            accessible-label: "Remove " + p.name;
+                            accessible-action-default => { I.remove(i); }
+                            Text {
+                                text: "✕";
+                                color: rm-touch.has-hover ? Theme.fg : Theme.faint;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            rm-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { I.remove(i); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
+                }
+            }
+        }
+        Rectangle {
+            x: parent.width - 1px;
+            width: 1px;
+            background: Theme.border;
+        }
+    }
+
+    // ───────────── The picture ─────────────
+    stage := Rectangle {
+        horizontal-stretch: 1;
+        min-width: 360px;
+        background: Theme.stage;
+        clip: true;
+        if !I.has-preview: Empty {
+            title: "Add a picture to get started";
+        }
+        if I.has-preview && I.cropping: Cropper {
+            width: stage.width;
+            height: stage.height;
+        }
+        if I.has-preview && !I.cropping && I.has-result && I.comparable: Compare {
+            width: stage.width;
+            height: stage.height;
+            left: I.preview;
+            right: I.result;
+            left-caption: I.left-caption;
+            right-caption: I.right-caption;
+            checker: true;
+        }
+        if I.has-preview && !I.cropping && !(I.has-result && I.comparable): Image {
+            width: stage.width;
+            height: stage.height;
+            source: I.has-result ? I.result : I.preview;
+            image-fit: contain;
+        }
+        if I.has-preview && !I.cropping && !(I.has-result && I.comparable): Rectangle {
+            x: 8px;
+            y: stage.height - 30px;
+            width: one-cap.preferred-width + 16px;
+            height: 22px;
+            border-radius: 3px;
+            background: #000000b3;
+            one-cap := Text {
+                text: I.has-result ? I.right-caption : I.left-caption;
+                color: white;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if I.has-result: VerticalLayout {
+            x: stage.width - self.preferred-width - 8px;
+            y: 8px;
+            width: self.preferred-width;
+            height: self.preferred-height;
+            spacing: 6px;
+            Btn {
+                text: "Show in folder";
+                background: Theme.raised;
+                clicked => { I.reveal(); }
+            }
+            if I.can-redo: Btn {
+                text: "Crop it differently";
+                background: Theme.raised;
+                clicked => { I.redo(); }
+            }
+        }
+        if I.note != "": Rectangle {
+            x: (stage.width - self.width) / 2;
+            y: 10px;
+            width: min(stage.width - 240px, note-text.preferred-width + 20px);
+            height: 26px;
+            border-radius: 4px;
+            background: #000000c0;
+            note-text := Text {
+                text: I.note;
+                color: white;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+
+    // ───────────── What to do ─────────────
+    Rectangle {
+        width: 340px;
+        horizontal-stretch: 0;
+        background: Theme.panel;
+        Rectangle {
+            x: 0;
+            width: 1px;
+            background: Theme.border;
+        }
+        VerticalLayout {
+            PaneTitle {
+                text: "What do you want to do?";
+            }
+            side := ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    width: side.visible-width;
+                    padding: 12px;
+                    spacing: 8px;
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ToolCard { data: I.tools[0]; selected: I.mode == 0; picked => { I.put("mode", 0); } }
+                        ToolCard { data: I.tools[1]; selected: I.mode == 1; picked => { I.put("mode", 1); } }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ToolCard { data: I.tools[2]; selected: I.mode == 2; picked => { I.put("mode", 2); } }
+                        ToolCard { data: I.tools[3]; selected: I.mode == 3; picked => { I.put("mode", 3); } }
+                    }
+                    ToolCard { data: I.tools[4]; selected: I.mode == 4; picked => { I.put("mode", 4); } }
+
+                    Rectangle { height: 6px; }
+
+                    if I.mode <= 1: Label { text: "Save as"; }
+                    if I.mode <= 1: Seg {
+                        name: "Picture format";
+                        options: I.formats;
+                        current: I.format;
+                        picked(i) => { I.put("format", i); }
+                    }
+                    if I.mode <= 1: Small { text: I.format-note; }
+
+                    if I.show-quality: HorizontalLayout {
+                        Label { text: "Quality"; horizontal-stretch: 1; }
+                        Small { text: round(I.quality) + " out of 100"; }
+                    }
+                    if I.show-quality: Slide {
+                        name: "Quality";
+                        minimum: 1;
+                        maximum: 100;
+                        value: I.quality;
+                        moved-to(v) => { I.put("quality", v); }
+                    }
+                    if I.show-quality: HorizontalLayout {
+                        Small { text: "Smaller file"; horizontal-stretch: 1; }
+                        Small { text: "Looks better"; }
+                    }
+                    if I.show-quality: Small { text: "Around 80, most photos look the same as the original."; }
+
+                    if I.mode == 1: Label { text: "No bigger than"; }
+                    if I.mode == 1: HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        LineEdit {
+                            width: 80px;
+                            height: 30px;
+                            input-type: number;
+                            text <=> I.target-text;
+                            accessible-label: "Size limit in kilobytes";
+                            accepted => { I.put-text("target", self.text); }
+                            changed has-focus => {
+                                if (!self.has-focus) { I.put-text("target", self.text); }
+                            }
+                        }
+                        Small { text: "KB"; vertical-alignment: center; }
+                    }
+                    if I.mode == 1: HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for kb in [100, 250, 500, 1024, 2048]: Btn {
+                            text: kb >= 1024 ? (kb / 1024) + " MB" : kb + " KB";
+                            height: 26px;
+                            clicked => { I.put("target", kb); }
+                        }
+                    }
+                    if I.mode == 1: Small { text: "Each picture gets the best quality that still fits under the limit."; }
+
+                    if I.mode == 2: Label { text: "Shape"; }
+                    if I.mode == 2: HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for shape[i] in ["Any shape", "Square", "Wide 16:9"]: Btn {
+                            text: shape;
+                            height: 28px;
+                            background: I.shape == i ? Theme.raised : transparent;
+                            clicked => { I.put("shape", i); }
+                        }
+                    }
+                    if I.mode == 2: HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for shape[i] in ["Photo 4:3", "Phone 9:16"]: Btn {
+                            text: shape;
+                            height: 28px;
+                            background: I.shape == i + 3 ? Theme.raised : transparent;
+                            clicked => { I.put("shape", i + 3); }
+                        }
+                    }
+                    if I.mode == 2: Small { text: "Drag the box on the picture to choose the part to keep. Crop works on the picture you have selected."; }
+
+                    if I.mode == 3: Small {
+                        font-size: 13px;
+                        text: "Finds the main person or object and makes everything else see-through. Works best when the subject stands out clearly. Saved as a PNG, which keeps the see-through parts.";
+                    }
+                    if I.mode == 4: Small {
+                        font-size: 13px;
+                        text: "Makes each picture four times wider and taller, and uses AI to fill in sharp detail. Needs a graphics card. Pictures that are already 4K or bigger are skipped. Saved as a PNG.";
+                    }
+
+                    Rectangle { height: 6px; }
+                    Label { text: "Where to save"; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: I.save-in;
+                            color: Theme.fg;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Btn {
+                            text: "Choose…";
+                            height: 28px;
+                            clicked => { I.choose-dir(); }
+                        }
+                        if I.has-dir: Btn {
+                            text: "Reset";
+                            kind: 2;
+                            height: 28px;
+                            clicked => { I.reset-dir(); }
+                        }
+                    }
+                    Small { text: "Your originals are never changed: results get a new name. Camera details and location stored in a photo are left out of the result."; }
+                }
+            }
+            if I.total-ratio >= 0: VerticalLayout {
+                vertical-stretch: 0;
+                Hairline { }
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+                    Meter {
+                        ratio: I.total-ratio;
+                        final: true;
+                        height: 8px;
+                    }
+                    Small { text: I.total-text; }
+                }
+            }
+            Hairline { }
+            VerticalLayout {
+                vertical-stretch: 0;
+                padding: 12px;
+                if I.busy: Btn {
+                    text: "Stop";
+                    height: 40px;
+                    clicked => { I.cancel(); }
+                }
+                if !I.busy: Btn {
+                    text: I.go-text;
+                    kind: 1;
+                    height: 40px;
+                    text-size: 14px;
+                    enabled: I.can-go;
+                    clicked => { I.go(); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,307 @@
+// The queue: what is waiting, what is encoding, what is done.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Btn, Toggle, PaneTitle, Hairline, Empty, Meter } from "theme.slint";
+
+export struct JobRow {
+    name: string,
+    detail: string,
+    status: string,
+    // 0 waiting, 1 encoding, 2 paused, 3 done, 4 failed, 5 cancelled
+    state: int,
+    progress: float,
+    // Result ÷ original once done.
+    ratio: float,
+}
+
+export global Q {
+    in property <[JobRow]> jobs;
+    in property <string> summary;
+    in property <bool> running;
+    in property <bool> paused;
+    in property <bool> can-start;
+    in property <int> finished;
+    in property <bool> sound;
+    in property <bool> shutdown;
+    // Hardware load, 0 – 1. `gpu` is negative when there is nothing to show.
+    in property <float> cpu;
+    in property <float> gpu: -1;
+    in property <float> ram;
+    in property <string> cpu-text;
+    in property <string> gpu-text;
+    in property <string> ram-text;
+    callback start();
+    callback pause();
+    callback resume();
+    callback stop();
+    callback clear-finished();
+    // What to do with job N: "cancel", "retry", "remove", "reveal", "play", "log", "edit", "up", "down".
+    callback act(int, string);
+    callback put(string, bool);
+}
+
+component Tiny inherits Rectangle {
+    in property <string> text;
+    in property <string> name;
+    callback clicked;
+    height: 22px;
+    width: t.preferred-width + 12px;
+    border-radius: 4px;
+    background: touch.has-hover ? Theme.raised : transparent;
+    accessible-role: button;
+    accessible-label: root.name == "" ? root.text : root.name;
+    accessible-action-default => { root.clicked(); }
+    t := Text {
+        text: root.text;
+        color: touch.has-hover ? Theme.fg : Theme.muted;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Load inherits VerticalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <float> value;
+    spacing: 3px;
+    HorizontalLayout {
+        Text {
+            text: root.label;
+            color: Theme.muted;
+            font-size: 12px;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            font-size: 12px;
+        }
+    }
+    Rectangle {
+        height: 4px;
+        border-radius: 2px;
+        background: #2a3041;
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.value, 0, 1);
+            border-radius: 2px;
+            background: #eceef3b0;
+            animate width { duration: 600ms; }
+        }
+    }
+}
+
+export component QueuePane inherits Rectangle {
+    width: 320px;
+    horizontal-stretch: 0;
+    background: Theme.panel;
+    Rectangle {
+        x: 0;
+        width: 1px;
+        background: Theme.border;
+    }
+    VerticalLayout {
+        PaneTitle {
+            text: "Queue";
+            note: Q.summary;
+            if !Q.running: Btn {
+                text: "Start";
+                kind: 1;
+                height: 30px;
+                enabled: Q.can-start;
+                clicked => { Q.start(); }
+            }
+            if Q.running && !Q.paused: Btn {
+                text: "Pause";
+                height: 30px;
+                clicked => { Q.pause(); }
+            }
+            if Q.running && Q.paused: Btn {
+                text: "Resume";
+                kind: 1;
+                height: 30px;
+                clicked => { Q.resume(); }
+            }
+            if Q.running: Btn {
+                text: "Stop";
+                kind: 2;
+                height: 30px;
+                clicked => { Q.stop(); }
+            }
+        }
+
+        if Q.jobs.length == 0: Empty {
+            title: "The queue is empty";
+            body: "Pick a size for a video, then choose \"Add to queue\". Videos are compressed one after another, and the queue is remembered if you close the app.";
+        }
+
+        if Q.jobs.length > 0: ListView {
+            vertical-stretch: 1;
+            for j[i] in Q.jobs: Rectangle {
+                height: 104px;
+                accessible-role: list-item;
+                accessible-label: "Job: " + j.name;
+                accessible-description: j.status;
+                VerticalLayout {
+                    padding-left: 14px;
+                    padding-right: 10px;
+                    padding-top: 9px;
+                    padding-bottom: 6px;
+                    spacing: 4px;
+                    Text {
+                        text: j.name;
+                        color: Theme.fg;
+                        font-weight: 500;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: j.detail;
+                        color: Theme.muted;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                    if j.state == 1 || j.state == 2: Rectangle {
+                        height: 6px;
+                        border-radius: 3px;
+                        background: #2a3041;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(j.progress, 0, 1);
+                            border-radius: 3px;
+                            background: j.state == 2 ? Theme.faint : Theme.primary;
+                            animate width { duration: 400ms; }
+                        }
+                    }
+                    if j.state == 3: Meter {
+                        ratio: j.ratio;
+                        final: true;
+                    }
+                    Text {
+                        text: j.status;
+                        color: j.state == 4 ? Theme.bad : (j.state == 3 ? Theme.saved : (j.state == 1 ? Theme.primary : Theme.muted));
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 2px;
+                        if j.state == 1 || j.state == 2: Tiny {
+                            text: "Cancel";
+                            name: "Cancel " + j.name;
+                            clicked => { Q.act(i, "cancel"); }
+                        }
+                        if j.state == 3: Tiny {
+                            text: "Show in folder";
+                            clicked => { Q.act(i, "reveal"); }
+                        }
+                        if j.state == 3: Tiny {
+                            text: "Play";
+                            clicked => { Q.act(i, "play"); }
+                        }
+                        if j.state == 0: Tiny {
+                            text: "▲";
+                            name: "Move " + j.name + " up";
+                            clicked => { Q.act(i, "up"); }
+                        }
+                        if j.state == 0: Tiny {
+                            text: "▼";
+                            name: "Move " + j.name + " down";
+                            clicked => { Q.act(i, "down"); }
+                        }
+                        if j.state == 0: Tiny {
+                            text: "Change";
+                            name: "Change settings of " + j.name;
+                            clicked => { Q.act(i, "edit"); }
+                        }
+                        if j.state >= 3: Tiny {
+                            text: j.state == 3 ? "Again" : "Try again";
+                            name: "Try " + j.name + " again";
+                            clicked => { Q.act(i, "retry"); }
+                        }
+                        Tiny {
+                            text: "Log";
+                            name: "Log of " + j.name;
+                            clicked => { Q.act(i, "log"); }
+                        }
+                        Tiny {
+                            text: "Remove";
+                            name: "Remove " + j.name + " from the queue";
+                            clicked => { Q.act(i, "remove"); }
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+            }
+        }
+
+        if Q.finished > 0: VerticalLayout {
+            vertical-stretch: 0;
+            Hairline { }
+            HorizontalLayout {
+                alignment: end;
+                padding: 6px;
+                Btn {
+                    text: "Clear " + Q.finished + " finished";
+                    kind: 2;
+                    height: 26px;
+                    clicked => { Q.clear-finished(); }
+                }
+            }
+        }
+        Hairline { }
+        VerticalLayout {
+            vertical-stretch: 0;
+            padding: 12px;
+            spacing: 6px;
+            Text {
+                text: "When everything is finished";
+                color: Theme.muted;
+                font-size: 12px;
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                alignment: start;
+                Toggle {
+                    text: "Play a sound";
+                    on: Q.sound;
+                    toggled(on) => { Q.put("sound", on); }
+                }
+                Toggle {
+                    text: "Turn the PC off";
+                    on: Q.shutdown;
+                    toggled(on) => { Q.put("shutdown", on); }
+                }
+            }
+        }
+        Hairline { }
+        VerticalLayout {
+            vertical-stretch: 0;
+            padding: 12px;
+            spacing: 8px;
+            Load {
+                label: "Processor";
+                text: Q.cpu-text;
+                value: Q.cpu;
+            }
+            if Q.gpu >= 0: Load {
+                label: "Graphics card";
+                text: Q.gpu-text;
+                value: Q.gpu;
+            }
+            Load {
+                label: "Memory";
+                text: Q.ram-text;
+                value: Q.ram;
+            }
+        }
+    }
+}

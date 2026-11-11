@@ -37,3 +37,4 @@ engine/av*.dll
 engine/sw*.dll
 engine/postproc*.dll
 engine/FFMPEG-LICENSE.txt
+/target

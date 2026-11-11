@@ -1,0 +1,31 @@
+[package]
+name = "make-video-small"
+version = "3.0.0"
+description = "Make Video Small - video and picture compression"
+authors = ["Sahiljeet Singh Kalsi (GhostofWeb)"]
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[dependencies]
+mvs-core = { path = "../core" }
+# Drawn on the processor: no web view and no graphics-card buffers, which is
+# what keeps the app's memory use low.
+slint = { version = "1.18", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-software",
+    "accessibility",
+    "image-default-formats",
+    "unstable-winit-030",
+] }
+rfd = "0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+
+[build-dependencies]
+slint-build = "1.18"
+winresource = "0.1"

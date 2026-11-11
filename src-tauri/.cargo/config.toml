@@ -1,3 +1,0 @@
-[env]
-# ts-rs writes the TypeScript bindings here when `cargo test` runs.
-TS_RS_EXPORT_DIR = { value = "../src/bindings", relative = true }
