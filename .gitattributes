@@ -1,0 +1,6 @@
+# Bundled third-party tools and models: not this project's code, so they are
+# left out of GitHub's language statistics.
+engine/** linguist-vendored
+
+# Slint interface files count as source.
+*.slint linguist-detectable
